@@ -1,0 +1,19 @@
+# Caddy reverse proxy with automatic HTTPS (Let's Encrypt).
+# DOMAIN and ACME_EMAIL come from the environment (set in .env, passed by compose).
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Allow large uploads (files/receipts/images). Matches MAX_UPLOAD_MB.
+	request_body {
+		max_size 30MB
+	}
+
+	reverse_proxy app:3000 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+	}
+}

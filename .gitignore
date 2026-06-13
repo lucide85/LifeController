@@ -32,6 +32,9 @@ settings.json
 /uploads/*
 !/uploads/.gitkeep
 
+# local backups produced by scripts/backup.sh
+/backups
+
 # claude code local (machine-specific permissions)
 .claude/settings.local.json
 

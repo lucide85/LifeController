@@ -5,6 +5,10 @@ import type { NextAuthConfig } from "next-auth";
 
 export const authConfig = {
   providers: [Google],
+  // Required when running behind a reverse proxy (Caddy/Nginx) so Auth.js trusts
+  // the forwarded Host header instead of throwing UntrustedHost. Safe here because
+  // only our own proxy fronts the app.
+  trustHost: true,
   pages: {
     signIn: "/signin",
   },

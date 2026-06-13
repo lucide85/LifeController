@@ -1,0 +1,74 @@
+# Production stack for a single Ubuntu VM with Docker:
+#   Caddy (TLS) ─► app (Next.js) ─► db (Postgres + pgvector)
+#
+# Usage:
+#   docker compose -f compose.prod.yml up -d db        # start DB first
+#   ./scripts/migrate.sh                                # apply schema
+#   docker compose -f compose.prod.yml up -d --build    # build + start app + caddy
+#
+# Required in .env: DOMAIN, ACME_EMAIL, POSTGRES_PASSWORD, AUTH_SECRET,
+# AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET, ANTHROPIC_API_KEY (and AUTH_URL=https://$DOMAIN).
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: lifecontroller-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lifecontroller
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: lifecontroller
+    volumes:
+      - lc_pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    # No published port — the DB is only reachable on the internal compose network.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lifecontroller -d lifecontroller"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lifecontroller-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Override DATABASE_URL to use the internal service hostname + the prod password.
+      DATABASE_URL: postgres://lifecontroller:${POSTGRES_PASSWORD}@db:5432/lifecontroller
+      UPLOAD_DIR: /data/uploads
+      NODE_ENV: production
+    volumes:
+      - lc_uploads:/data/uploads
+    # Not published to the host — only Caddy reaches it over the compose network.
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2
+    container_name: lifecontroller-caddy
+    restart: unless-stopped
+    depends_on:
+      - app
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - lc_caddy_data:/data
+      - lc_caddy_config:/config
+
+volumes:
+  lc_pgdata:
+  lc_uploads:
+  lc_caddy_data:
+  lc_caddy_config:

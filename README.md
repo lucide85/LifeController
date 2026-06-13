@@ -34,8 +34,14 @@ npm run db:migrate
 npm run dev                     # http://localhost:3000
 ```
 
-Sign in with `avikane@gmail.com` → auto-admin. Full instructions, Google OAuth
-setup, and VPS/Docker deployment are in **[SETUP.md](SETUP.md)**.
+Sign in with `avikane@gmail.com` → auto-admin. Full local setup and Google OAuth
+steps are in **[SETUP.md](SETUP.md)**.
+
+## Deploy to a server
+
+Production deployment to an Ubuntu VM with Docker — Caddy automatic HTTPS, hardened
+Postgres, one-command migrations and backups — is documented in
+**[DEPLOY.md](DEPLOY.md)** (uses `compose.prod.yml`).
 
 ## Tech
 
