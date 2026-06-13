@@ -1,0 +1,5 @@
+# Normalize line endings to LF in the repo (this app builds/deploys on Linux).
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.svg text eol=lf

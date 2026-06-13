@@ -1,0 +1,6 @@
+{
+  "_comment": "Copy this file to settings.json on the server. settings.json is gitignored and must never be committed. The adminSecureCode grants admin access to whoever logs in and enters it on the Admin page — use it for break-glass access if the admin Google account is unavailable. Generate a strong value, e.g. `openssl rand -hex 32`.",
+  "adminSecureCode": "REPLACE_WITH_A_LONG_RANDOM_SECRET_openssl_rand_hex_32",
+  "appName": "LifeController",
+  "allowSelfSignupRequests": true
+}

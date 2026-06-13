@@ -1,0 +1,44 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: lifecontroller-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lifecontroller
+      POSTGRES_PASSWORD: change_me_in_prod
+      POSTGRES_DB: lifecontroller
+    ports:
+      - "5432:5432"
+    volumes:
+      - lc_pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lifecontroller -d lifecontroller"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lifecontroller-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Inside the compose network the DB host is the service name, not localhost.
+      DATABASE_URL: postgres://lifecontroller:change_me_in_prod@db:5432/lifecontroller
+      UPLOAD_DIR: /data/uploads
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persist uploaded files outside the container on the host disk.
+      - lc_uploads:/data/uploads
+
+volumes:
+  lc_pgdata:
+  lc_uploads:
