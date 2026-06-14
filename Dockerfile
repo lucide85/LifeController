@@ -1,8 +1,11 @@
 # ── Dependencies ────────────────────────────────────────────────────────────
 FROM node:20-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm ci || npm install
+COPY package.json package-lock.json* .npmrc* ./
+# No committed lockfile yet, so use `npm install`. .npmrc sets legacy-peer-deps so
+# conservative peer ranges (React 19 + Radix/next-auth beta) don't break ERESOLVE.
+# Once a package-lock.json is committed, switch this to `npm ci` for reproducible builds.
+RUN npm install --legacy-peer-deps --no-audit --no-fund
 
 # ── Builder ──────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
