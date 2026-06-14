@@ -17,6 +17,8 @@ import {
   StickyNote,
   Sparkles,
   ExternalLink,
+  Wrench,
+  Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -34,9 +36,13 @@ import { categoryDef } from "@/lib/categories";
 import { formatBytes, formatDate } from "@/lib/utils";
 import { EditItemForm } from "@/components/edit-item-form";
 import { AskAboutItem } from "@/components/ask-about-item";
+import { MaintenanceSection, type Task } from "@/components/maintenance-section";
+import { FilePreview, type PreviewAttachment } from "@/components/file-preview";
+import { AutofillDialog } from "@/components/autofill-dialog";
 
 interface Attachment {
   id: string;
+  taskId: string | null;
   kind: string;
   source: string;
   fileName: string;
@@ -58,6 +64,7 @@ interface ItemData {
   updatedAt: string;
   attachments: Attachment[];
   notes: { id: string; body: string; createdAt: string }[];
+  tasks: Task[];
 }
 
 export function ItemDetail({ item }: { item: ItemData }) {
@@ -67,6 +74,9 @@ export function ItemDetail({ item }: { item: ItemData }) {
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Item-level files only; task galleries live under the Maintenance tab.
+  const itemAttachments = item.attachments.filter((a) => !a.taskId);
 
   async function deleteItem() {
     setDeleting(true);
@@ -114,9 +124,12 @@ export function ItemDetail({ item }: { item: ItemData }) {
       </div>
 
       <Tabs defaultValue="overview">
-        <TabsList>
+        <TabsList className="flex-wrap">
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="files">Files ({item.attachments.length})</TabsTrigger>
+          <TabsTrigger value="files">Files ({itemAttachments.length})</TabsTrigger>
+          <TabsTrigger value="maintenance">
+            <Wrench className="mr-1 h-3.5 w-3.5" /> Maintenance ({item.tasks.length})
+          </TabsTrigger>
           <TabsTrigger value="notes">Notes ({item.notes.length})</TabsTrigger>
           <TabsTrigger value="ask">
             <Sparkles className="mr-1 h-3.5 w-3.5" /> Ask AI
@@ -127,7 +140,20 @@ export function ItemDetail({ item }: { item: ItemData }) {
           <Overview item={item} />
         </TabsContent>
         <TabsContent value="files">
-          <FilesSection itemId={item.id} attachments={item.attachments} />
+          <FilesSection
+            itemId={item.id}
+            attachments={itemAttachments}
+            itemDescription={item.description}
+            itemFields={item.fields}
+          />
+        </TabsContent>
+        <TabsContent value="maintenance">
+          <MaintenanceSection
+            itemId={item.id}
+            itemTitle={item.title}
+            tasks={item.tasks}
+            attachments={item.attachments}
+          />
         </TabsContent>
         <TabsContent value="notes">
           <NotesSection itemId={item.id} notes={item.notes} />
@@ -229,11 +255,23 @@ function kindIcon(kind: string, mime: string) {
   return FileText;
 }
 
-function FilesSection({ itemId, attachments }: { itemId: string; attachments: Attachment[] }) {
+function FilesSection({
+  itemId,
+  attachments,
+  itemDescription,
+  itemFields,
+}: {
+  itemId: string;
+  attachments: Attachment[];
+  itemDescription: string | null;
+  itemFields: Record<string, string>;
+}) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [preview, setPreview] = useState<PreviewAttachment | null>(null);
+  const [autofill, setAutofill] = useState<Attachment | null>(null);
 
   async function uploadFiles(files: FileList | File[]) {
     setUploading(true);
@@ -293,6 +331,10 @@ function FilesSection({ itemId, attachments }: { itemId: string; attachments: At
         <div className="grid gap-2">
           {attachments.map((a) => {
             const FileIcon = kindIcon(a.kind, a.mimeType);
+            const canAutofill =
+              a.mimeType === "application/pdf" ||
+              a.mimeType.startsWith("image/") ||
+              a.mimeType.startsWith("text/");
             return (
               <Card key={a.id} className="bg-card/60">
                 <CardContent className="flex items-center gap-3 p-3">
@@ -329,8 +371,21 @@ function FilesSection({ itemId, attachments }: { itemId: string; attachments: At
                       ) : null}
                     </p>
                   </div>
-                  <Button asChild variant="ghost" size="icon">
-                    <a href={`/api/files/${a.id}`} target="_blank" rel="noreferrer">
+                  {canAutofill && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Auto-fill item details from this file"
+                      onClick={() => setAutofill(a)}
+                    >
+                      <Sparkles className="text-primary" />
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="icon" title="Preview" onClick={() => setPreview(a)}>
+                    <Eye />
+                  </Button>
+                  <Button asChild variant="ghost" size="icon" title="Download">
+                    <a href={`/api/files/${a.id}?download=1`}>
                       <Download />
                     </a>
                   </Button>
@@ -342,6 +397,21 @@ function FilesSection({ itemId, attachments }: { itemId: string; attachments: At
             );
           })}
         </div>
+      )}
+
+      <FilePreview attachment={preview} onOpenChange={(o) => !o && setPreview(null)} />
+      {autofill && (
+        <AutofillDialog
+          itemId={itemId}
+          attachment={{ id: autofill.id, fileName: autofill.fileName }}
+          currentDescription={itemDescription}
+          currentFields={itemFields}
+          onClose={() => setAutofill(null)}
+          onApplied={() => {
+            setAutofill(null);
+            router.refresh();
+          }}
+        />
       )}
     </div>
   );

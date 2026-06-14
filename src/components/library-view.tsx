@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { CATEGORIES, categoryDef } from "@/lib/categories";
 import { formatDate } from "@/lib/utils";
+import { RemindersWidget, type Reminder } from "@/components/reminders-widget";
 
 interface ItemRow {
   id: string;
@@ -22,9 +23,11 @@ interface ItemRow {
 
 export function LibraryView({
   items,
+  reminders = [],
   userName,
 }: {
   items: ItemRow[];
+  reminders?: Reminder[];
   userName?: string;
 }) {
   const [query, setQuery] = useState("");
@@ -75,6 +78,8 @@ export function LibraryView({
           </div>
         </div>
       </div>
+
+      <RemindersWidget reminders={reminders} />
 
       {/* Search + filters */}
       <div className="flex flex-col gap-4">

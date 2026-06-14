@@ -28,6 +28,9 @@ export const attachmentKind = pgEnum("attachment_kind", [
 ]);
 // Where an attachment came from: uploaded by the user, or found online by the agent.
 export const attachmentSource = pgEnum("attachment_source", ["upload", "web"]);
+// Maintenance task lifecycle + where a task/routine came from.
+export const maintenanceStatus = pgEnum("maintenance_status", ["planned", "done"]);
+export const taskSource = pgEnum("task_source", ["user", "manual", "web"]);
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 // Access is gated: a new Google login lands as `pending` until an admin approves.
@@ -76,10 +79,41 @@ export const items = pgTable(
   })
 );
 
+// ── Maintenance tasks ─────────────────────────────────────────────────────────
+// Service/maintenance entries for an item. `planned` tasks with a `dueDate` power
+// the reminders dashboard; `done` tasks (with `completedAt`) are the service log.
+// `recurrenceMonths`/`recurrenceNote` describe routines (e.g. every 6 months).
+export const maintenanceTasks = pgTable(
+  "maintenance_tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    status: maintenanceStatus("status").notNull().default("planned"),
+    dueDate: timestamp("due_date", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    cost: text("cost"),
+    recurrenceMonths: integer("recurrence_months"),
+    recurrenceNote: text("recurrence_note"),
+    source: taskSource("source").notNull().default("user"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    itemIdx: index("maintenance_tasks_item_idx").on(t.itemId),
+    dueIdx: index("maintenance_tasks_due_idx").on(t.dueDate),
+    statusIdx: index("maintenance_tasks_status_idx").on(t.status),
+  })
+);
+
 // ── Attachments ─────────────────────────────────────────────────────────────────
 // Files / receipts / images stored on local disk; `storageKey` is the path under
 // UPLOAD_DIR. `extractedText` holds OCR'd / parsed text used for search, and
-// `embedding` is its semantic vector.
+// `embedding` is its semantic vector. An attachment may optionally belong to a
+// maintenance task (its gallery / documents) via `taskId`.
 export const attachments = pgTable(
   "attachments",
   {
@@ -87,6 +121,7 @@ export const attachments = pgTable(
     itemId: uuid("item_id")
       .notNull()
       .references(() => items.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id").references(() => maintenanceTasks.id, { onDelete: "cascade" }),
     kind: attachmentKind("kind").notNull().default("file"),
     source: attachmentSource("source").notNull().default("upload"),
     fileName: text("file_name").notNull(),
@@ -102,6 +137,7 @@ export const attachments = pgTable(
   },
   (t) => ({
     itemIdx: index("attachments_item_idx").on(t.itemId),
+    taskIdx: index("attachments_task_idx").on(t.taskId),
     embeddingIdx: index("attachments_embedding_idx").using(
       "hnsw",
       t.embedding.op("vector_cosine_ops")
@@ -136,10 +172,20 @@ export const itemsRelations = relations(items, ({ one, many }) => ({
   owner: one(users, { fields: [items.ownerId], references: [users.id] }),
   attachments: many(attachments),
   notes: many(notes),
+  tasks: many(maintenanceTasks),
+}));
+
+export const maintenanceTasksRelations = relations(maintenanceTasks, ({ one, many }) => ({
+  item: one(items, { fields: [maintenanceTasks.itemId], references: [items.id] }),
+  attachments: many(attachments),
 }));
 
 export const attachmentsRelations = relations(attachments, ({ one }) => ({
   item: one(items, { fields: [attachments.itemId], references: [items.id] }),
+  task: one(maintenanceTasks, {
+    fields: [attachments.taskId],
+    references: [maintenanceTasks.id],
+  }),
 }));
 
 export const notesRelations = relations(notes, ({ one }) => ({
@@ -150,3 +196,4 @@ export type User = typeof users.$inferSelect;
 export type Item = typeof items.$inferSelect;
 export type Attachment = typeof attachments.$inferSelect;
 export type Note = typeof notes.$inferSelect;
+export type MaintenanceTask = typeof maintenanceTasks.$inferSelect;

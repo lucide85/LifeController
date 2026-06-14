@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { items, attachments } from "@/lib/db/schema";
+import { items, attachments, maintenanceTasks } from "@/lib/db/schema";
 import { getApprovedUserOrNull } from "@/lib/auth-guard";
 import { saveBuffer } from "@/lib/storage";
 import { extractText } from "@/lib/ai/extract";
@@ -34,9 +34,18 @@ export async function POST(
   const form = await req.formData();
   const file = form.get("file");
   const kindHint = form.get("kind")?.toString();
+  const taskId = form.get("taskId")?.toString() || null;
 
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "No file provided" }, { status: 400 });
+  }
+
+  // If attaching to a maintenance task, verify it belongs to this item.
+  if (taskId) {
+    const task = await db.query.maintenanceTasks.findFirst({
+      where: and(eq(maintenanceTasks.id, taskId), eq(maintenanceTasks.itemId, id)),
+    });
+    if (!task) return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
 
   const maxMb = Number(process.env.MAX_UPLOAD_MB ?? 25);
@@ -65,6 +74,7 @@ export async function POST(
     .insert(attachments)
     .values({
       itemId: id,
+      taskId,
       kind: kindFor(mime, kindHint),
       source: "upload",
       fileName: file.name,

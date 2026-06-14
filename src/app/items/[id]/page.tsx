@@ -21,6 +21,7 @@ export default async function ItemPage({
     with: {
       attachments: { columns: { embedding: false } },
       notes: { columns: { embedding: false } },
+      tasks: true,
     },
   });
 
@@ -39,6 +40,7 @@ export default async function ItemPage({
     attachments: item.attachments
       .map((a) => ({
         id: a.id,
+        taskId: a.taskId,
         kind: a.kind,
         source: a.source,
         fileName: a.fileName,
@@ -51,6 +53,21 @@ export default async function ItemPage({
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)),
     notes: item.notes
       .map((n) => ({ id: n.id, body: n.body, createdAt: n.createdAt.toISOString() }))
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)),
+    tasks: item.tasks
+      .map((t) => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        status: t.status,
+        dueDate: t.dueDate ? t.dueDate.toISOString() : null,
+        completedAt: t.completedAt ? t.completedAt.toISOString() : null,
+        cost: t.cost,
+        recurrenceMonths: t.recurrenceMonths,
+        recurrenceNote: t.recurrenceNote,
+        source: t.source,
+        createdAt: t.createdAt.toISOString(),
+      }))
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)),
   };
 

@@ -15,8 +15,11 @@ until $COMPOSE exec -T db pg_isready -U lifecontroller -d lifecontroller >/dev/n
   sleep 1
 done
 
-echo "→ Applying schema (drizzle/0000_init.sql)…"
-$COMPOSE exec -T db psql -v ON_ERROR_STOP=1 -U lifecontroller -d lifecontroller \
-  < drizzle/0000_init.sql
+# Apply every migration in order. The files are idempotent (IF NOT EXISTS / DO
+# blocks that swallow duplicate_object), so re-running is safe.
+for f in $(ls drizzle/*.sql | sort); do
+  echo "→ Applying ${f} …"
+  $COMPOSE exec -T db psql -v ON_ERROR_STOP=1 -U lifecontroller -d lifecontroller < "${f}"
+done
 
 echo "✓ Schema applied."
