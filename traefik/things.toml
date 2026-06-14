@@ -1,0 +1,32 @@
+# Traefik dynamic config for LifeController, matching the vikane.cloud setup
+# (Traefik v2.0, TOML file provider at /srv/services.toml, no watch).
+#
+# APPEND this block to /srv/services.toml on the Traefik VM, then restart Traefik:
+#   sudo cp /srv/services.toml /srv/services.toml.bak
+#   sudo nano /srv/services.toml        # paste the block below at the end
+#   sudo docker restart docker_reverse-proxy_1
+#
+# Mirrors the existing run.vikane.cloud entry: entrypoint "https", certResolver
+# "wilson", and an http->https redirect. Service points at the app-VM + APP_PORT.
+
+  [http.services.things]
+    [http.services.things.loadBalancer]
+    [[http.services.things.loadBalancer.servers]]
+      url = "http://192.168.1.25:3002/"
+
+  [http.routers.things]
+    rule = "Host(`things.vikane.cloud`)"
+    entryPoints = ["https"]
+    service = "things"
+    [http.routers.things.tls]
+      certResolver = "wilson"
+
+  [http.routers.things-http]
+    rule = "Host(`things.vikane.cloud`)"
+    entryPoints = ["http"]
+    service = "things"
+    middlewares = ["things-redirect"]
+
+  [http.middlewares.things-redirect.redirectScheme]
+    scheme = "https"
+    permanent = true

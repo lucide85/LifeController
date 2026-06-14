@@ -24,8 +24,8 @@ Fixed facts about the environment:
 |---|---|
 | App-VM (runs containers) | `192.168.1.25` (Ubuntu Server 24.04, Docker + compose) |
 | This site's port | **3002** (3001 is `treningsapp`) → maps to the container's 3000 |
-| Traefik | separate VM, file provider, `/etc/traefik/dynamic/`, `watch: true` |
-| HTTPS entrypoint / cert resolver | `websecure` / `letsencrypt` |
+| Traefik | separate VM (Docker `traefik:v2.0`), file provider = single TOML file `/srv/services.toml` (no `watch` → restart to reload) |
+| HTTPS entrypoint / cert resolver | `https` / `wilson` (httpChallenge via the `http` entrypoint) |
 | Subdomain | `things.vikane.cloud` |
 
 ## 1. DNS
@@ -97,34 +97,53 @@ sudo ufw allow from <TRAEFIK_VM_IP> to any port 3002 proto tcp
 
 ## 5. On the Traefik VM: add the route
 
-Put the dynamic file in place (Traefik picks it up automatically, no restart). Either
-copy it from the clone:
+The file provider points at a single TOML file (`/srv/services.toml`) and has no
+`watch`, so we append a block and restart the container. See
+[`traefik/things.toml`](traefik/things.toml) for the exact block (mirrors the existing
+`run.vikane.cloud` entry: entrypoint `https`, certResolver `wilson`, plus an http→https
+redirect).
+
 ```bash
-scp <user>@192.168.1.25:~/LifeController/traefik/things.yml /etc/traefik/dynamic/things.yml
-```
-or create `/etc/traefik/dynamic/things.yml` by hand with:
-```yaml
-http:
-  routers:
-    things:
-      rule: "Host(`things.vikane.cloud`)"
-      entryPoints: [websecure]
-      service: things-svc
-      tls:
-        certResolver: letsencrypt
-  services:
-    things-svc:
-      loadBalancer:
-        passHostHeader: true
-        servers:
-          - url: "http://192.168.1.25:3002"
+# 1) back up first
+sudo cp /srv/services.toml /srv/services.toml.bak
+
+# 2) append the things router + service (single-quoted heredoc keeps the backticks)
+sudo tee -a /srv/services.toml > /dev/null <<'EOF'
+
+  [http.services.things]
+    [http.services.things.loadBalancer]
+    [[http.services.things.loadBalancer.servers]]
+      url = "http://192.168.1.25:3002/"
+
+  [http.routers.things]
+    rule = "Host(`things.vikane.cloud`)"
+    entryPoints = ["https"]
+    service = "things"
+    [http.routers.things.tls]
+      certResolver = "wilson"
+
+  [http.routers.things-http]
+    rule = "Host(`things.vikane.cloud`)"
+    entryPoints = ["http"]
+    service = "things"
+    middlewares = ["things-redirect"]
+
+  [http.middlewares.things-redirect.redirectScheme]
+    scheme = "https"
+    permanent = true
+EOF
+
+# 3) reload Traefik (no watch configured)
+sudo docker restart docker_reverse-proxy_1
 ```
 
 ## 6. Verify
 
-Open **https://things.vikane.cloud**. Traefik fetches the Let's Encrypt cert on the
-first request. Sign in with Google — the first login with **`avikane@gmail.com`**
-becomes admin; everyone else is *pending* until you approve them in **Admin → Users**.
+Open **https://things.vikane.cloud**. Traefik fetches the Let's Encrypt cert (resolver
+`wilson`, http-01 challenge on port 80) on the first request — give it a few seconds.
+Watch issuance / errors with `sudo docker logs --tail=50 docker_reverse-proxy_1`.
+Sign in with Google — the first login with **`avikane@gmail.com`** becomes admin;
+everyone else is *pending* until you approve them in **Admin → Users**.
 
 ## Day-2 operations (Option A)
 
