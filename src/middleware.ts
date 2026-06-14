@@ -22,7 +22,9 @@ export default middleware((req) => {
 });
 
 export const config = {
-  // Run on everything except Next static assets. File streaming (/api/files) does
-  // its own per-user authorization check inside the route handler.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // Run only on PAGE routes. Exclude ALL /api so middleware never intercepts the
+  // Auth.js endpoints (/api/auth/*) — intercepting them redirected the sign-in
+  // fetches to /signin (HTML), which broke login. Our own API routes (items,
+  // search, files, admin) enforce auth themselves and return JSON 401/403.
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
 };
