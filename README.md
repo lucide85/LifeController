@@ -39,9 +39,14 @@ steps are in **[SETUP.md](SETUP.md)**.
 
 ## Deploy to a server
 
-Production deployment to an Ubuntu VM with Docker — Caddy automatic HTTPS, hardened
-Postgres, one-command migrations and backups — is documented in
-**[DEPLOY.md](DEPLOY.md)** (uses `compose.prod.yml`).
+Full Ubuntu + Docker deployment is in **[DEPLOY.md](DEPLOY.md)**:
+
+- **Behind an existing Traefik** (`compose.vm.yml`) — runs as a container on the
+  app-VM; your Traefik VM provides HTTPS. One dynamic file ([traefik/things.yml](traefik/things.yml)) + one DNS record.
+- **Standalone** (`compose.prod.yml`) — bundled Caddy gets the TLS cert itself.
+
+Both include hardened Postgres, Node-free migrations (`scripts/migrate.sh`) and
+backups (`scripts/backup.sh`).
 
 ## Tech
 

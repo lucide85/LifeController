@@ -1,0 +1,23 @@
+# Traefik dynamic config for LifeController.
+# Copy this to the Traefik VM at /etc/traefik/dynamic/things.yml — Traefik picks it
+# up automatically (file provider, watch: true), no restart needed.
+#
+# Modelled on the existing traefik/treningsapp.yml. If your Traefik uses different
+# names, change `websecure` / `letsencrypt` to match your static config.
+http:
+  routers:
+    things:
+      rule: "Host(`things.vikane.cloud`)"
+      entryPoints:
+        - websecure
+      service: things-svc
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    things-svc:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          # app-VM IP + the published port from compose.vm.yml (APP_PORT).
+          - url: "http://192.168.1.25:3002"

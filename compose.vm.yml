@@ -1,0 +1,57 @@
+# Production stack for the existing vikane.cloud infra:
+# a container on the app-VM (192.168.1.25), fronted by the SEPARATE Traefik VM.
+# Traefik terminates TLS (Let's Encrypt) and proxies to this app over plain HTTP,
+# so there is NO Caddy / no TLS here.
+#
+#   Traefik VM (websecure/443) ──http──► app :${APP_PORT} ─► db (Postgres + pgvector)
+#
+# Usage (see DEPLOY.md):
+#   export COMPOSE_FILE=compose.vm.yml
+#   docker compose up -d db
+#   bash scripts/migrate.sh
+#   docker compose up -d --build
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: lifecontroller-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lifecontroller
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: lifecontroller
+    volumes:
+      - lc_pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    # No published port — only reachable on the internal compose network.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lifecontroller -d lifecontroller"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lifecontroller-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://lifecontroller:${POSTGRES_PASSWORD}@db:5432/lifecontroller
+      UPLOAD_DIR: /data/uploads
+      NODE_ENV: production
+    volumes:
+      - lc_uploads:/data/uploads
+    # Publish the chosen host port → container's 3000. Traefik (other VM) connects
+    # to http://192.168.1.25:${APP_PORT}. ufw restricts this port to the Traefik VM.
+    ports:
+      - "${APP_PORT:-3002}:3000"
+
+volumes:
+  lc_pgdata:
+  lc_uploads:

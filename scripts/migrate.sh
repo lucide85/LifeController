@@ -5,7 +5,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-COMPOSE="docker compose -f compose.prod.yml"
+# Honor Docker's native COMPOSE_FILE env var; default to the Caddy stack.
+# For the vikane.cloud / Traefik deploy: export COMPOSE_FILE=compose.vm.yml
+export COMPOSE_FILE="${COMPOSE_FILE:-compose.prod.yml}"
+COMPOSE="docker compose"
 
 echo "→ Waiting for the database to be ready…"
 until $COMPOSE exec -T db pg_isready -U lifecontroller -d lifecontroller >/dev/null 2>&1; do

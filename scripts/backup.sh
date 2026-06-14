@@ -4,7 +4,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-COMPOSE="docker compose -f compose.prod.yml"
+# Honor Docker's native COMPOSE_FILE env var; default to the Caddy stack.
+# For the vikane.cloud / Traefik deploy: export COMPOSE_FILE=compose.vm.yml
+export COMPOSE_FILE="${COMPOSE_FILE:-compose.prod.yml}"
+COMPOSE="docker compose"
 STAMP=$(date +%Y%m%d-%H%M%S)
 mkdir -p backups
 
