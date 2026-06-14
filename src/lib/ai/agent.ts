@@ -49,8 +49,8 @@ export async function answerFromLibrary(
   });
 
   const text = res.content
-    .filter((b): b is { type: "text"; text: string } => b.type === "text")
-    .map((b) => b.text)
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .filter(Boolean)
     .join("\n")
     .trim();
 
@@ -111,8 +111,8 @@ export async function searchWeb(
   });
 
   const text = res.content
-    .filter((b): b is { type: "text"; text: string } => b.type === "text")
-    .map((b) => b.text)
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .filter(Boolean)
     .join("\n")
     .trim();
 

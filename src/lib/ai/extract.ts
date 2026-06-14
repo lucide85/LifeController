@@ -13,8 +13,7 @@ export async function extractText(
       // Import the inner module directly: the package's index.js has a debug
       // branch that tries to read a bundled test PDF when `module.parent` is
       // falsy, which crashes under bundlers. The lib entry avoids that.
-      const mod = await import("pdf-parse/lib/pdf-parse.js");
-      const pdfParse = (mod.default ?? mod) as (b: Buffer) => Promise<{ text: string }>;
+      const { default: pdfParse } = await import("pdf-parse/lib/pdf-parse.js");
       const data = await pdfParse(buffer);
       return data.text?.trim() ?? "";
     }
@@ -64,8 +63,8 @@ async function describeImage(buffer: Buffer, mimeType: string): Promise<string> 
   });
 
   return res.content
-    .filter((b): b is { type: "text"; text: string } => b.type === "text")
-    .map((b) => b.text)
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .filter(Boolean)
     .join("\n")
     .trim();
 }
