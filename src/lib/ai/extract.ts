@@ -14,8 +14,23 @@ export async function extractText(
       // branch that tries to read a bundled test PDF when `module.parent` is
       // falsy, which crashes under bundlers. The lib entry avoids that.
       const { default: pdfParse } = await import("pdf-parse/lib/pdf-parse.js");
-      const data = await pdfParse(buffer);
-      return data.text?.trim() ?? "";
+      let text = "";
+      try {
+        const data = await pdfParse(buffer);
+        text = data.text?.trim() ?? "";
+      } catch (err) {
+        console.error("pdf-parse failed for", fileName, err);
+      }
+
+      // Scanned / image-only PDFs have little or no text layer, so pdf-parse
+      // returns ~nothing. Fall back to Claude, which reads PDF pages (including
+      // scans) natively. Bounded by size so we don't push a huge file to the API.
+      const MAX_PDF_OCR_BYTES = 18 * 1024 * 1024;
+      if (text.length < 40 && hasAnthropic() && buffer.byteLength <= MAX_PDF_OCR_BYTES) {
+        const ocr = await transcribePdfWithClaude(buffer);
+        if (ocr) return ocr;
+      }
+      return text;
     }
 
     if (mimeType.startsWith("text/") || /\.(txt|md|csv|json|log)$/i.test(fileName)) {
@@ -29,6 +44,49 @@ export async function extractText(
     console.error("extractText failed for", fileName, err);
   }
   return "";
+}
+
+// OCR/transcribe a PDF (including scanned, image-only PDFs) via Claude's native
+// PDF document support. Returns the readable text, or "" on failure.
+async function transcribePdfWithClaude(buffer: Buffer): Promise<string> {
+  const anthropic = getAnthropic();
+  try {
+    const res = await anthropic.messages.create({
+      model: getModel(),
+      max_tokens: 4096,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: {
+                type: "base64",
+                media_type: "application/pdf",
+                data: buffer.toString("base64"),
+              },
+            },
+            {
+              type: "text",
+              text:
+                "Transcribe this document so it can be found later by search. " +
+                "Capture all visible text verbatim — brand, model, serial/part numbers, " +
+                "dates, amounts, specifications, section headings and tables. Preserve the " +
+                "reading order. Do not summarize or add commentary; output only the text.",
+            },
+          ],
+        },
+      ],
+    });
+    return res.content
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  } catch (err) {
+    console.error("transcribePdfWithClaude failed:", err);
+    return "";
+  }
 }
 
 async function describeImage(buffer: Buffer, mimeType: string): Promise<string> {

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Loader2, Sparkles, Check, AlertTriangle } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Loader2, Sparkles, Check, AlertTriangle, RefreshCw } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -37,34 +37,50 @@ export function AutofillDialog({
   const [useDescription, setUseDescription] = useState(true);
   const [chosen, setChosen] = useState<Record<string, boolean>>({});
   const [applying, setApplying] = useState(false);
+  const [canReread, setCanReread] = useState(false);
+  const [rereading, setRereading] = useState(false);
+
+  const runAutofill = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setCanReread(false);
+    const res = await fetch(`/api/items/${itemId}/autofill`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ attachmentId: attachment.id }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(typeof j.error === "string" ? j.error : "Could not read that file.");
+      // A 422 means no text was extracted yet — offer to re-read with AI (OCR).
+      setCanReread(res.status === 422);
+      setLoading(false);
+      return;
+    }
+    const data: Suggestion = await res.json();
+    setSuggestion(data);
+    setUseDescription(Boolean(data.description));
+    setChosen(Object.fromEntries(Object.keys(data.fields ?? {}).map((k) => [k, true] as const)));
+    setLoading(false);
+  }, [itemId, attachment.id]);
+
+  async function reread() {
+    setRereading(true);
+    setError(null);
+    const res = await fetch(`/api/attachments/${attachment.id}/reextract`, { method: "POST" });
+    setRereading(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      setError(typeof j.error === "string" ? j.error : "Could not re-read that file.");
+      setCanReread(false);
+      return;
+    }
+    await runAutofill();
+  }
 
   useEffect(() => {
-    let active = true;
-    (async () => {
-      setLoading(true);
-      setError(null);
-      const res = await fetch(`/api/items/${itemId}/autofill`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ attachmentId: attachment.id }),
-      });
-      if (!active) return;
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setError(typeof j.error === "string" ? j.error : "Could not read that file.");
-        setLoading(false);
-        return;
-      }
-      const data: Suggestion = await res.json();
-      setSuggestion(data);
-      setUseDescription(Boolean(data.description));
-      setChosen(Object.fromEntries(Object.keys(data.fields ?? {}).map((k) => [k, true] as const)));
-      setLoading(false);
-    })();
-    return () => {
-      active = false;
-    };
-  }, [itemId, attachment.id]);
+    runAutofill();
+  }, [runAutofill]);
 
   async function apply() {
     if (!suggestion) return;
@@ -97,16 +113,32 @@ export function AutofillDialog({
           </DialogTitle>
         </DialogHeader>
 
-        {loading && (
+        {(loading || rereading) && (
           <div className="flex items-center gap-3 py-8 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Reading the file and extracting details…
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {rereading
+              ? "Re-reading the file with AI (OCR for scans)…"
+              : "Reading the file and extracting details…"}
           </div>
         )}
 
-        {error && (
-          <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-            <span>{error}</span>
+        {error && !rereading && (
+          <div className="space-y-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+              <span>{error}</span>
+            </div>
+            {canReread && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  This looks like a scanned file with no text layer. Let AI read the pages
+                  directly — this can take a moment.
+                </p>
+                <Button size="sm" variant="outline" onClick={reread}>
+                  <RefreshCw /> Re-read with AI
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
@@ -159,7 +191,7 @@ export function AutofillDialog({
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={apply} disabled={applying || loading || !!error || !!nothingFound}>
+          <Button onClick={apply} disabled={applying || loading || rereading || !!error || !!nothingFound}>
             {applying ? <Loader2 className="animate-spin" /> : <Check />} Apply
           </Button>
         </DialogFooter>
