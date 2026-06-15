@@ -31,6 +31,11 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/drizzle ./drizzle
 COPY --from=builder /app/src/lib/db ./src/lib/db
 
+# sharp ships a platform-specific native binary (musl on alpine) that Next's
+# standalone tracing can miss; copy it explicitly so thumbnail generation works.
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/sharp ./node_modules/sharp
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@img ./node_modules/@img
+
 # Uploads directory (mounted as a volume in docker-compose).
 RUN mkdir -p /data/uploads && chown -R nextjs:nodejs /data
 

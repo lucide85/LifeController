@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { requireApprovedUser } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
 import { items } from "@/lib/db/schema";
+import { relatedItems } from "@/lib/ai/search";
 import { AppShell } from "@/components/app-shell";
 import { ItemDetail } from "@/components/item-detail";
 
@@ -26,6 +27,9 @@ export default async function ItemPage({
   });
 
   if (!item) notFound();
+
+  // Nearest items by embedding (best-effort: empty if AI/embeddings are off).
+  const related = await relatedItems(user.id, item.id, 6).catch(() => []);
 
   // Serialize dates for the client component.
   const serialized = {
@@ -69,6 +73,12 @@ export default async function ItemPage({
         createdAt: t.createdAt.toISOString(),
       }))
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)),
+    related: related.map((r) => ({
+      id: r.id,
+      title: r.title,
+      category: r.category,
+      location: r.location,
+    })),
   };
 
   return (

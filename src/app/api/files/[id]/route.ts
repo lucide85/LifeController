@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { attachments, items } from "@/lib/db/schema";
 import { getApprovedUserOrNull } from "@/lib/auth-guard";
 import { readStored } from "@/lib/storage";
+import { getThumbnail } from "@/lib/thumbnail";
 
 export const runtime = "nodejs";
 
@@ -31,6 +32,20 @@ export async function GET(
   const att = row[0];
   if (!att || att.ownerId !== user.id) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // Thumbnail variant for galleries/grids: serve a small cached WebP instead of
+  // the full-resolution original. Falls back to the original if generation fails.
+  if (req.nextUrl.searchParams.get("variant") === "thumb") {
+    const thumb = await getThumbnail(att.storageKey, att.mimeType);
+    if (thumb) {
+      return new NextResponse(thumb as unknown as BodyInit, {
+        headers: {
+          "Content-Type": "image/webp",
+          "Cache-Control": "private, max-age=86400",
+        },
+      });
+    }
   }
 
   try {

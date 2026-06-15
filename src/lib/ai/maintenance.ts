@@ -1,6 +1,6 @@
 // AI helpers for the maintenance features: auto-filling item details from a file,
 // and proposing service routines from a manual or the web.
-import { getAnthropic, getModel } from "./anthropic";
+import { getAnthropic, getModel, structuredExtract, firstToolInput, type JsonSchema } from "./anthropic";
 
 // Pull the first JSON object/array out of a model response (tolerates ``` fences
 // and surrounding prose).
@@ -29,28 +29,37 @@ export interface AutofillResult {
   fields: Record<string, string>;
 }
 
+const AUTOFILL_SCHEMA: JsonSchema = {
+  type: "object",
+  properties: {
+    description: {
+      type: "string",
+      description: "A concise 1-3 sentence summary of the item.",
+    },
+    fields: {
+      type: "object",
+      description:
+        "Key specifications found in the document (brand, model, serial number, year, " +
+        "dimensions, power, etc.) as a flat map of string values.",
+      additionalProperties: { type: "string" },
+    },
+  },
+  required: ["description", "fields"],
+};
+
 export async function autofillFromFile(
   itemContext: string,
   fileText: string
 ): Promise<AutofillResult> {
-  const anthropic = getAnthropic();
-  const res = await anthropic.messages.create({
-    model: getModel(),
-    max_tokens: 1024,
-    system:
-      "You extract structured details about an item from a document (manual, receipt, " +
-      'spec sheet). Return ONLY JSON: {"description": string, "fields": {"<key>": "<value>"}}. ' +
-      "description = a concise 1-3 sentence summary of the item. fields = key specs you can " +
-      "find (brand, model, serial number, year, dimensions, power, etc.). Use only facts present " +
-      "in the document; omit anything you cannot find. Respond with JSON only, no prose.",
-    messages: [
-      {
-        role: "user",
-        content: `Item so far:\n${itemContext}\n\n--- DOCUMENT ---\n${fileText.slice(0, 20000)}`,
-      },
-    ],
-  });
-  const parsed = parseJson<AutofillResult>(textOf(res.content));
+  const parsed = (await structuredExtract({
+    toolName: "record_item_details",
+    toolDescription:
+      "Record the structured details extracted from a document about an item. Use only facts " +
+      "present in the document; omit anything you cannot find.",
+    schema: AUTOFILL_SCHEMA,
+    maxTokens: 1024,
+    userContent: `Item so far:\n${itemContext}\n\n--- DOCUMENT ---\n${fileText.slice(0, 20000)}`,
+  })) as AutofillResult | null;
   return {
     description: typeof parsed?.description === "string" ? parsed.description : "",
     fields:
@@ -77,11 +86,37 @@ export interface RoutinesResult {
 }
 
 const ROUTINES_SYSTEM =
-  "You produce a recommended maintenance schedule for the item. Return ONLY JSON: " +
-  '{"routines":[{"title":string,"description":string,"recurrenceMonths":number|null,"recurrenceNote":string|null}]}. ' +
+  "You produce a recommended maintenance schedule for the item. " +
   "recurrenceMonths = interval in months if time-based (e.g. 6, 12, 24). recurrenceNote = a " +
   'non-time interval such as "every 10 000 km" or "every 250 operating hours", else null. ' +
-  "Give 3-10 concrete, item-specific routines. Respond with JSON only.";
+  "Give 3-10 concrete, item-specific routines.";
+
+const ROUTINES_SCHEMA: JsonSchema = {
+  type: "object",
+  properties: {
+    routines: {
+      type: "array",
+      description: "The recommended maintenance routines.",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Short routine name." },
+          description: { type: "string", description: "What the routine involves." },
+          recurrenceMonths: {
+            type: ["integer", "null"],
+            description: "Interval in months if time-based, else null.",
+          },
+          recurrenceNote: {
+            type: ["string", "null"],
+            description: 'Non-time interval (e.g. "every 10 000 km"), else null.',
+          },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  required: ["routines"],
+};
 
 function normalizeRoutines(routines: unknown): RoutineSuggestion[] {
   if (!Array.isArray(routines)) return [];
@@ -110,19 +145,14 @@ export async function suggestRoutinesFromText(
   itemContext: string,
   manualText: string
 ): Promise<RoutinesResult> {
-  const anthropic = getAnthropic();
-  const res = await anthropic.messages.create({
-    model: getModel(),
-    max_tokens: 1500,
+  const parsed = (await structuredExtract({
+    toolName: "record_routines",
+    toolDescription: "Record the recommended maintenance routines for the item.",
+    schema: ROUTINES_SCHEMA,
     system: ROUTINES_SYSTEM,
-    messages: [
-      {
-        role: "user",
-        content: `Item:\n${itemContext}\n\n--- SERVICE MANUAL ---\n${manualText.slice(0, 24000)}`,
-      },
-    ],
-  });
-  const parsed = parseJson<{ routines: unknown }>(textOf(res.content));
+    maxTokens: 1500,
+    userContent: `Item:\n${itemContext}\n\n--- SERVICE MANUAL ---\n${manualText.slice(0, 24000)}`,
+  })) as { routines: unknown } | null;
   return { routines: normalizeRoutines(parsed?.routines), citations: [] };
 }
 
@@ -134,11 +164,20 @@ export async function suggestRoutinesFromWeb(itemContext: string): Promise<Routi
   const res = await anthropic.messages.create({
     model: getModel(),
     max_tokens: 1800,
-    tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 } as never],
+    // web_search runs first (can't be forced), then the model records its answer
+    // via the record_routines tool. tool_choice stays auto so search can happen.
+    tools: [
+      { type: "web_search_20250305", name: "web_search", max_uses: 5 },
+      {
+        name: "record_routines",
+        description: "Record the recommended maintenance routines once you have researched them.",
+        input_schema: ROUTINES_SCHEMA,
+      },
+    ] as never,
     system:
       ROUTINES_SYSTEM +
       " First, use web search to find the manufacturer's recommended maintenance intervals for " +
-      "this exact item, then return the JSON.",
+      "this exact item, then call record_routines with the result.",
     messages: [
       {
         role: "user",
@@ -157,6 +196,9 @@ export async function suggestRoutinesFromWeb(itemContext: string): Promise<Routi
       }
     }
   }
-  const parsed = parseJson<{ routines: unknown }>(textOf(res.content));
+  // Prefer the structured tool call; fall back to parsing prose JSON if the model
+  // answered in text instead of calling record_routines.
+  const fromTool = firstToolInput(res.content, "record_routines") as { routines: unknown } | null;
+  const parsed = fromTool ?? parseJson<{ routines: unknown }>(textOf(res.content));
   return { routines: normalizeRoutines(parsed?.routines), citations };
 }

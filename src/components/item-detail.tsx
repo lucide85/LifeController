@@ -39,6 +39,7 @@ import { AskAboutItem } from "@/components/ask-about-item";
 import { MaintenanceSection, type Task } from "@/components/maintenance-section";
 import { FilePreview, type PreviewAttachment } from "@/components/file-preview";
 import { AutofillDialog } from "@/components/autofill-dialog";
+import { GallerySection } from "@/components/gallery-section";
 
 interface Attachment {
   id: string;
@@ -53,6 +54,13 @@ interface Attachment {
   createdAt: string;
 }
 
+interface RelatedItemView {
+  id: string;
+  title: string;
+  category: string;
+  location: string | null;
+}
+
 interface ItemData {
   id: string;
   title: string;
@@ -65,6 +73,7 @@ interface ItemData {
   attachments: Attachment[];
   notes: { id: string; body: string; createdAt: string }[];
   tasks: Task[];
+  related: RelatedItemView[];
 }
 
 export function ItemDetail({ item }: { item: ItemData }) {
@@ -77,6 +86,16 @@ export function ItemDetail({ item }: { item: ItemData }) {
 
   // Item-level files only; task galleries live under the Maintenance tab.
   const itemAttachments = item.attachments.filter((a) => !a.taskId);
+  // Gallery aggregates every image on the item — item-level, per-task and web.
+  const galleryImages = item.attachments
+    .filter((a) => a.mimeType.startsWith("image/"))
+    .map((a) => ({
+      id: a.id,
+      fileName: a.fileName,
+      createdAt: a.createdAt,
+      source: a.source,
+      sourceUrl: a.sourceUrl,
+    }));
 
   async function deleteItem() {
     setDeleting(true);
@@ -127,6 +146,9 @@ export function ItemDetail({ item }: { item: ItemData }) {
         <TabsList className="flex-wrap">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="files">Files ({itemAttachments.length})</TabsTrigger>
+          <TabsTrigger value="gallery">
+            <ImageIcon className="mr-1 h-3.5 w-3.5" /> Gallery ({galleryImages.length})
+          </TabsTrigger>
           <TabsTrigger value="maintenance">
             <Wrench className="mr-1 h-3.5 w-3.5" /> Maintenance ({item.tasks.length})
           </TabsTrigger>
@@ -146,6 +168,9 @@ export function ItemDetail({ item }: { item: ItemData }) {
             itemDescription={item.description}
             itemFields={item.fields}
           />
+        </TabsContent>
+        <TabsContent value="gallery">
+          <GallerySection images={galleryImages} />
         </TabsContent>
         <TabsContent value="maintenance">
           <MaintenanceSection
@@ -205,7 +230,8 @@ export function ItemDetail({ item }: { item: ItemData }) {
 function Overview({ item }: { item: ItemData }) {
   const fieldEntries = Object.entries(item.fields ?? {});
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-3">
       <Card className="glass lg:col-span-2">
         <CardContent className="p-6">
           <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Description</h3>
@@ -245,7 +271,40 @@ function Overview({ item }: { item: ItemData }) {
           )}
         </CardContent>
       </Card>
+      </div>
+      {item.related.length > 0 && <RelatedItems items={item.related} />}
     </div>
+  );
+}
+
+function RelatedItems({ items }: { items: RelatedItemView[] }) {
+  return (
+    <Card className="glass">
+      <CardContent className="p-6">
+        <h3 className="mb-3 text-sm font-semibold text-muted-foreground">Related items</h3>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map((r) => {
+            const rdef = categoryDef(r.category);
+            const RIcon = rdef.icon;
+            return (
+              <Link
+                key={r.id}
+                href={`/items/${r.id}`}
+                className="group flex items-center gap-3 rounded-lg border border-border/60 bg-card/50 p-3 transition-colors hover:border-primary/40"
+              >
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground group-hover:text-primary">
+                  <RIcon className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium group-hover:text-primary">{r.title}</p>
+                  <p className="truncate text-xs text-muted-foreground">{r.location || rdef.label}</p>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
