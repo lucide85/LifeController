@@ -45,6 +45,15 @@ export async function POST(
     );
   }
 
-  const suggestion = await autofillFromFile(itemEmbedText(item), att.extractedText);
-  return NextResponse.json(suggestion);
+  try {
+    const suggestion = await autofillFromFile(itemEmbedText(item), att.extractedText);
+    return NextResponse.json(suggestion);
+  } catch (err) {
+    console.error("autofill failed:", err);
+    const detail = err instanceof Error ? err.message : "unknown error";
+    return NextResponse.json(
+      { error: `Auto-fill failed while reading the file (${detail}).` },
+      { status: 500 }
+    );
+  }
 }

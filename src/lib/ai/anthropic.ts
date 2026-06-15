@@ -46,23 +46,29 @@ export async function structuredExtract(params: {
   temperature?: number;
 }): Promise<unknown | null> {
   const anthropic = getAnthropic();
-  const res = await anthropic.messages.create({
-    model: getModel(),
-    max_tokens: params.maxTokens ?? 1024,
-    temperature: params.temperature ?? 0.2,
-    ...(params.system ? { system: params.system } : {}),
-    // Cast: the schema is a plain JSON Schema; the SDK's strict tool typing is
-    // narrower than what the API accepts (same pattern as the web_search tool).
-    tools: [
-      {
-        name: params.toolName,
-        description: params.toolDescription,
-        input_schema: params.schema,
-      },
-    ] as never,
-    // Force the model to answer by calling our tool, so the result is structured.
-    tool_choice: { type: "tool", name: params.toolName } as never,
-    messages: [{ role: "user", content: params.userContent }],
-  });
-  return firstToolInput(res.content, params.toolName);
+  try {
+    const res = await anthropic.messages.create({
+      model: getModel(),
+      max_tokens: params.maxTokens ?? 1024,
+      temperature: params.temperature ?? 0.2,
+      ...(params.system ? { system: params.system } : {}),
+      // Cast: the schema is a plain JSON Schema; the SDK's strict tool typing is
+      // narrower than what the API accepts (same pattern as the web_search tool).
+      tools: [
+        {
+          name: params.toolName,
+          description: params.toolDescription,
+          input_schema: params.schema,
+        },
+      ] as never,
+      // Force the model to answer by calling our tool, so the result is structured.
+      tool_choice: { type: "tool", name: params.toolName } as never,
+      messages: [{ role: "user", content: params.userContent }],
+    });
+    return firstToolInput(res.content, params.toolName);
+  } catch (err) {
+    // Never throw from here: callers treat null as "fall back to a plain call".
+    console.error(`structuredExtract(${params.toolName}) failed:`, err);
+    return null;
+  }
 }

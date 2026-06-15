@@ -23,6 +23,24 @@ function textOf(content: { type: string; text?: string }[]): string {
   return content.map((b) => (b.type === "text" ? b.text ?? "" : "")).join("\n");
 }
 
+// Legacy plain free-text completion (no tools). Used as a fallback when the
+// structured (forced tool-use) path returns nothing, so extraction keeps working
+// even if tool-use is unavailable for the configured model.
+async function plainComplete(
+  system: string,
+  userContent: string,
+  maxTokens: number
+): Promise<string> {
+  const anthropic = getAnthropic();
+  const res = await anthropic.messages.create({
+    model: getModel(),
+    max_tokens: maxTokens,
+    system,
+    messages: [{ role: "user", content: userContent }],
+  });
+  return textOf(res.content);
+}
+
 // ── Auto-fill item details from a document ───────────────────────────────────
 export interface AutofillResult {
   description: string;
@@ -47,19 +65,31 @@ const AUTOFILL_SCHEMA: JsonSchema = {
   required: ["description", "fields"],
 };
 
+const AUTOFILL_SYSTEM =
+  "You extract structured details about an item from a document (manual, receipt, " +
+  'spec sheet). Return ONLY JSON: {"description": string, "fields": {"<key>": "<value>"}}. ' +
+  "description = a concise 1-3 sentence summary of the item. fields = key specs you can " +
+  "find (brand, model, serial number, year, dimensions, power, etc.). Use only facts present " +
+  "in the document; omit anything you cannot find. Respond with JSON only, no prose.";
+
 export async function autofillFromFile(
   itemContext: string,
   fileText: string
 ): Promise<AutofillResult> {
-  const parsed = (await structuredExtract({
+  const userContent = `Item so far:\n${itemContext}\n\n--- DOCUMENT ---\n${fileText.slice(0, 20000)}`;
+  let parsed = (await structuredExtract({
     toolName: "record_item_details",
     toolDescription:
       "Record the structured details extracted from a document about an item. Use only facts " +
       "present in the document; omit anything you cannot find.",
     schema: AUTOFILL_SCHEMA,
     maxTokens: 1024,
-    userContent: `Item so far:\n${itemContext}\n\n--- DOCUMENT ---\n${fileText.slice(0, 20000)}`,
+    userContent,
   })) as AutofillResult | null;
+  // Fallback to the legacy free-text method if forced tool-use yielded nothing.
+  if (!parsed) {
+    parsed = parseJson<AutofillResult>(await plainComplete(AUTOFILL_SYSTEM, userContent, 1024));
+  }
   return {
     description: typeof parsed?.description === "string" ? parsed.description : "",
     fields:
@@ -141,18 +171,29 @@ function normalizeRoutines(routines: unknown): RoutineSuggestion[] {
     }));
 }
 
+const ROUTINES_SYSTEM_JSON =
+  ROUTINES_SYSTEM +
+  ' Return ONLY JSON: {"routines":[{"title":string,"description":string,' +
+  '"recurrenceMonths":number|null,"recurrenceNote":string|null}]}. Respond with JSON only, no prose.';
+
 export async function suggestRoutinesFromText(
   itemContext: string,
   manualText: string
 ): Promise<RoutinesResult> {
-  const parsed = (await structuredExtract({
+  const userContent = `Item:\n${itemContext}\n\n--- SERVICE MANUAL ---\n${manualText.slice(0, 24000)}`;
+  let parsed = (await structuredExtract({
     toolName: "record_routines",
     toolDescription: "Record the recommended maintenance routines for the item.",
     schema: ROUTINES_SCHEMA,
     system: ROUTINES_SYSTEM,
     maxTokens: 1500,
-    userContent: `Item:\n${itemContext}\n\n--- SERVICE MANUAL ---\n${manualText.slice(0, 24000)}`,
+    userContent,
   })) as { routines: unknown } | null;
+  if (!parsed) {
+    parsed = parseJson<{ routines: unknown }>(
+      await plainComplete(ROUTINES_SYSTEM_JSON, userContent, 1500)
+    );
+  }
   return { routines: normalizeRoutines(parsed?.routines), citations: [] };
 }
 
