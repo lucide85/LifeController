@@ -57,6 +57,9 @@ async function transcribePdfWithClaude(buffer: Buffer): Promise<string> {
       messages: [
         {
           role: "user",
+          // `document` PDF blocks are supported at runtime but absent from this
+          // SDK version's content-block union, so cast (same pattern as the
+          // web_search tool in maintenance.ts).
           content: [
             {
               type: "document",
@@ -74,7 +77,7 @@ async function transcribePdfWithClaude(buffer: Buffer): Promise<string> {
                 "dates, amounts, specifications, section headings and tables. Preserve the " +
                 "reading order. Do not summarize or add commentary; output only the text.",
             },
-          ],
+          ] as never,
         },
       ],
     });
