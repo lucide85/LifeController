@@ -43,14 +43,13 @@ export async function structuredExtract(params: {
   userContent: string;
   system?: string;
   maxTokens?: number;
-  temperature?: number;
 }): Promise<unknown | null> {
   const anthropic = getAnthropic();
   try {
     const res = await anthropic.messages.create({
       model: getModel(),
       max_tokens: params.maxTokens ?? 1024,
-      temperature: params.temperature ?? 0.2,
+      // Note: `temperature` is deprecated/rejected by claude-opus-4-8 — don't send it.
       ...(params.system ? { system: params.system } : {}),
       // Cast: the schema is a plain JSON Schema; the SDK's strict tool typing is
       // narrower than what the API accepts (same pattern as the web_search tool).
