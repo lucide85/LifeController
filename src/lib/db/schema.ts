@@ -34,6 +34,9 @@ export const maintenanceStatus = pgEnum("maintenance_status", ["planned", "done"
 export const taskSource = pgEnum("task_source", ["user", "manual", "web"]);
 // Where a recorded spec-field value came from (provenance / write-back history).
 export const factSource = pgEnum("fact_source", ["manual", "ai", "chat", "web", "upload"]);
+// Capture-inbox lifecycle + what kind of raw thing was dropped.
+export const captureStatus = pgEnum("capture_status", ["inbox", "filed", "discarded"]);
+export const captureKind = pgEnum("capture_kind", ["text", "url", "file"]);
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 // Access is gated: a new Google login lands as `pending` until an admin approves.
@@ -144,6 +147,8 @@ export const attachments = pgTable(
     // For web-sourced docs: where it was found.
     sourceUrl: text("source_url"),
     sourceTitle: text("source_title"),
+    // Normalized URL for idempotent de-duplication of web captures.
+    canonicalUrl: text("canonical_url"),
     extractedText: text("extracted_text"),
     embedding: vector("embedding", { dimensions: EMBEDDING_DIM }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -203,9 +208,54 @@ export const factRevisions = pgTable(
   })
 );
 
+// ── Captures (drop-and-structure inbox) ─────────────────────────────────────────
+// A raw thing dropped into the inbox with no chosen item: pasted text, a URL, or
+// an uploaded file. AI triage proposes how to file it (attach to an existing item
+// or create a new one); the proposal lives in `suggestedAction` until the owner
+// confirms, at which point it becomes a real item/attachment/note and status=filed.
+export const captures = pgTable(
+  "captures",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: uuid("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: captureStatus("status").notNull().default("inbox"),
+    kind: captureKind("kind").notNull().default("text"),
+    rawText: text("raw_text"),
+    sourceUrl: text("source_url"),
+    sourceTitle: text("source_title"),
+    fileName: text("file_name"),
+    mimeType: text("mime_type"),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull().default(0),
+    storageKey: text("storage_key"),
+    // For URL captures: the og:image we downloaded (stored as a storageKey too).
+    imageUrl: text("image_url"),
+    extractedText: text("extracted_text"),
+    embedding: vector("embedding", { dimensions: EMBEDDING_DIM }),
+    // The AI triage proposal (action/target/newItem/tags/summary/candidates).
+    suggestedAction: jsonb("suggested_action").$type<Record<string, unknown>>(),
+    filedItemId: uuid("filed_item_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    ownerIdx: index("captures_owner_idx").on(t.ownerId),
+    statusIdx: index("captures_status_idx").on(t.status),
+    embeddingIdx: index("captures_embedding_idx").using(
+      "hnsw",
+      t.embedding.op("vector_cosine_ops")
+    ),
+  })
+);
+
 // ── Relations ──────────────────────────────────────────────────────────────────
 export const usersRelations = relations(users, ({ many }) => ({
   items: many(items),
+  captures: many(captures),
+}));
+
+export const capturesRelations = relations(captures, ({ one }) => ({
+  owner: one(users, { fields: [captures.ownerId], references: [users.id] }),
 }));
 
 export const itemsRelations = relations(items, ({ one, many }) => ({
@@ -243,3 +293,4 @@ export type Attachment = typeof attachments.$inferSelect;
 export type Note = typeof notes.$inferSelect;
 export type MaintenanceTask = typeof maintenanceTasks.$inferSelect;
 export type FactRevision = typeof factRevisions.$inferSelect;
+export type Capture = typeof captures.$inferSelect;

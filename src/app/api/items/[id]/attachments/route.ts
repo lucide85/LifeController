@@ -3,9 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { items, attachments, maintenanceTasks } from "@/lib/db/schema";
 import { getApprovedUserOrNull } from "@/lib/auth-guard";
-import { saveBuffer } from "@/lib/storage";
-import { extractText } from "@/lib/ai/extract";
-import { embed } from "@/lib/ai/embeddings";
+import { processUpload } from "@/lib/ingest/process";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -56,19 +54,13 @@ export async function POST(
   const buffer = Buffer.from(await file.arrayBuffer());
   const mime = file.type || "application/octet-stream";
 
-  const { storageKey, sizeBytes } = await saveBuffer(id, file.name, buffer);
-
-  // Extract searchable text + embed it (best-effort; never blocks the upload).
-  let extractedText = "";
-  let embedding: number[] | null = null;
-  try {
-    extractedText = await extractText(buffer, mime, file.name);
-    if (extractedText) {
-      embedding = await embed(`${file.name}\n${extractedText}`);
-    }
-  } catch (err) {
-    console.error("attachment processing failed:", err);
-  }
+  // Save + extract searchable text + embed (best-effort; never blocks the upload).
+  const { storageKey, sizeBytes, extractedText, embedding } = await processUpload({
+    prefix: id,
+    fileName: file.name,
+    mimeType: mime,
+    buffer,
+  });
 
   const [created] = await db
     .insert(attachments)

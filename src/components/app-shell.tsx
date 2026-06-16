@@ -1,16 +1,33 @@
 import Link from "next/link";
-import { Library, Sparkles, Plus, Boxes } from "lucide-react";
+import { and, eq, sql } from "drizzle-orm";
+import { Library, Sparkles, Plus, Boxes, Inbox } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { UserMenu } from "@/components/user-menu";
-import type { User } from "@/lib/db/schema";
+import { db } from "@/lib/db";
+import { captures, type User } from "@/lib/db/schema";
 
-export function AppShell({
+async function inboxCount(userId: string): Promise<number> {
+  try {
+    const [row] = await db
+      .select({ c: sql<number>`count(*)::int` })
+      .from(captures)
+      .where(and(eq(captures.ownerId, userId), eq(captures.status, "inbox")));
+    return Number(row?.c ?? 0);
+  } catch {
+    // Table may not exist yet (migration not applied) — don't break every page.
+    return 0;
+  }
+}
+
+export async function AppShell({
   user,
   children,
 }: {
   user: User;
   children: React.ReactNode;
 }) {
+  const pendingCaptures = await inboxCount(user.id);
   return (
     <div className="relative min-h-screen">
       <div className="aurora-bg" />
@@ -32,6 +49,16 @@ export function AppShell({
             <Button asChild variant="ghost" size="sm">
               <Link href="/search">
                 <Sparkles /> <span className="hidden sm:inline">Ask AI</span>
+              </Link>
+            </Button>
+            <Button asChild variant="ghost" size="sm" className="relative">
+              <Link href="/inbox">
+                <Inbox /> <span className="hidden sm:inline">Inbox</span>
+                {pendingCaptures > 0 && (
+                  <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
+                    {pendingCaptures}
+                  </Badge>
+                )}
               </Link>
             </Button>
             <Button asChild size="sm" className="ml-1">

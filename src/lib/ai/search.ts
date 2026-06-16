@@ -76,6 +76,30 @@ export interface RelatedItem {
   score: number;
 }
 
+// Nearest items to an arbitrary embedding vector (e.g. a capture). Used by the
+// inbox triage to find candidate items a dropped thing might belong to.
+export interface NearestItem {
+  id: string;
+  title: string;
+  category: string;
+  score: number;
+}
+
+export async function nearestItemsByVector(
+  userId: string,
+  vec: number[],
+  limit = 5
+): Promise<NearestItem[]> {
+  const sim = SIM(items.embedding, vec);
+  const rows = await db
+    .select({ id: items.id, title: items.title, category: items.category, score: sim })
+    .from(items)
+    .where(and(eq(items.ownerId, userId), sql`${items.embedding} is not null`))
+    .orderBy(desc(sim))
+    .limit(limit);
+  return rows.map((r) => ({ ...r, score: Number(r.score) }));
+}
+
 export async function relatedItems(
   userId: string,
   itemId: string,
