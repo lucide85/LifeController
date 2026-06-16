@@ -15,6 +15,18 @@ import {
 } from "@/components/ui/select";
 import { CATEGORIES } from "@/lib/categories";
 
+// Front-page layout archetypes (kept inline so this client component doesn't pull
+// in the server-only distill module / Anthropic SDK).
+const LAYOUT_OPTIONS: { value: string; label: string }[] = [
+  { value: "generic", label: "Generic" },
+  { value: "property", label: "Property / House" },
+  { value: "vehicle", label: "Vehicle" },
+  { value: "travel", label: "Travel plan" },
+  { value: "tech", label: "Tech / Electronics" },
+  { value: "vessel", label: "Boat / Vessel" },
+  { value: "document", label: "Document" },
+];
+
 interface EditItem {
   id: string;
   title: string;
@@ -23,6 +35,7 @@ interface EditItem {
   location: string | null;
   tags: string[];
   fields: Record<string, string>;
+  layout?: string;
 }
 
 export function EditItemForm({ item, onSaved }: { item: EditItem; onSaved: () => void }) {
@@ -31,6 +44,7 @@ export function EditItemForm({ item, onSaved }: { item: EditItem; onSaved: () =>
   const [description, setDescription] = useState(item.description ?? "");
   const [location, setLocation] = useState(item.location ?? "");
   const [tags, setTags] = useState(item.tags.join(", "));
+  const [layout, setLayout] = useState(item.layout ?? "generic");
   const [fields, setFields] = useState<{ key: string; value: string }[]>(
     Object.entries(item.fields ?? {}).map(([key, value]) => ({ key, value })) || []
   );
@@ -55,6 +69,7 @@ export function EditItemForm({ item, onSaved }: { item: EditItem; onSaved: () =>
         location: location.trim() || null,
         tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
         fields: fieldObj,
+        layout,
       }),
     });
     setSaving(false);
@@ -87,6 +102,24 @@ export function EditItemForm({ item, onSaved }: { item: EditItem; onSaved: () =>
           <Label>Location</Label>
           <Input value={location} onChange={(e) => setLocation(e.target.value)} />
         </div>
+      </div>
+      <div className="space-y-2">
+        <Label>Front-page layout</Label>
+        <Select value={layout} onValueChange={setLayout}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {LAYOUT_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Controls how the overview is presented. Auto-set when you generate a summary.
+        </p>
       </div>
       <div className="space-y-2">
         <Label>Description</Label>

@@ -40,6 +40,11 @@ export default async function ItemPage({
     location: item.location,
     tags: item.tags ?? [],
     fields: item.fields ?? {},
+    summaryMd: item.summaryMd ?? null,
+    summaryAtAGlance: item.summaryAtAGlance ?? null,
+    summaryUpdatedAt: item.summaryUpdatedAt ? item.summaryUpdatedAt.toISOString() : null,
+    layout: item.layout ?? "generic",
+    fieldsMeta: item.fieldsMeta ?? {},
     updatedAt: item.updatedAt.toISOString(),
     attachments: item.attachments
       .map((a) => ({

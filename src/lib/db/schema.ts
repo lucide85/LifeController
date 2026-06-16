@@ -63,6 +63,16 @@ export const items = pgTable(
     fields: jsonb("fields").$type<Record<string, string>>().default({}),
     tags: text("tags").array().default([]),
     location: text("location"),
+    // AI-distilled "living" front page: a markdown summary + a one-line at-a-glance,
+    // refreshed when the item changes. `layout` is the inferred archetype that drives
+    // the adaptive front-page presentation; `fieldsMeta` marks hero fields + type hints.
+    summaryMd: text("summary_md"),
+    summaryAtAGlance: text("summary_at_a_glance"),
+    summaryUpdatedAt: timestamp("summary_updated_at", { withTimezone: true }),
+    layout: text("layout").notNull().default("generic"),
+    fieldsMeta: jsonb("fields_meta")
+      .$type<Record<string, { hero?: boolean; type?: string }>>()
+      .default({}),
     // Semantic embedding of the item's title + description + fields, for AI search.
     embedding: vector("embedding", { dimensions: EMBEDDING_DIM }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

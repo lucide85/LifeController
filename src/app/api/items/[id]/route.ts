@@ -42,6 +42,9 @@ const patchSchema = z.object({
   location: z.string().max(300).nullable().optional(),
   tags: z.array(z.string().max(60)).max(40).optional(),
   fields: z.record(z.string(), z.string()).optional(),
+  layout: z
+    .enum(["property", "vehicle", "travel", "tech", "vessel", "document", "generic"])
+    .optional(),
 });
 
 export async function PATCH(
@@ -74,7 +77,12 @@ export async function PATCH(
 
   const [updated] = await db
     .update(items)
-    .set({ ...merged, embedding: embedding ?? existing.embedding, updatedAt: new Date() })
+    .set({
+      ...merged,
+      ...(d.layout ? { layout: d.layout } : {}),
+      embedding: embedding ?? existing.embedding,
+      updatedAt: new Date(),
+    })
     .where(eq(items.id, id))
     .returning();
 

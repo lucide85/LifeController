@@ -40,6 +40,7 @@ import { MaintenanceSection, type Task } from "@/components/maintenance-section"
 import { FilePreview, type PreviewAttachment } from "@/components/file-preview";
 import { AutofillDialog } from "@/components/autofill-dialog";
 import { GallerySection } from "@/components/gallery-section";
+import { FrontPage } from "@/components/front-page";
 
 interface Attachment {
   id: string;
@@ -69,6 +70,11 @@ interface ItemData {
   location: string | null;
   tags: string[];
   fields: Record<string, string>;
+  summaryMd: string | null;
+  summaryAtAGlance: string | null;
+  summaryUpdatedAt: string | null;
+  layout: string;
+  fieldsMeta: Record<string, { hero?: boolean; type?: string }>;
   updatedAt: string;
   attachments: Attachment[];
   notes: { id: string; body: string; createdAt: string }[];
@@ -228,83 +234,23 @@ export function ItemDetail({ item }: { item: ItemData }) {
 }
 
 function Overview({ item }: { item: ItemData }) {
-  const fieldEntries = Object.entries(item.fields ?? {});
   return (
-    <div className="space-y-4">
-      <div className="grid gap-4 lg:grid-cols-3">
-      <Card className="glass lg:col-span-2">
-        <CardContent className="p-6">
-          <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Description</h3>
-          <p className="whitespace-pre-wrap text-sm">
-            {item.description || "No description yet — use Edit to add one."}
-          </p>
-        </CardContent>
-      </Card>
-      <Card className="glass">
-        <CardContent className="space-y-4 p-6">
-          <div>
-            <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Specifications</h3>
-            {fieldEntries.length === 0 ? (
-              <p className="text-sm text-muted-foreground">None added.</p>
-            ) : (
-              <dl className="space-y-2">
-                {fieldEntries.map(([k, v]) => (
-                  <div key={k} className="flex justify-between gap-3 text-sm">
-                    <dt className="text-muted-foreground">{k}</dt>
-                    <dd className="text-right font-medium">{v}</dd>
-                  </div>
-                ))}
-              </dl>
-            )}
-          </div>
-          {item.tags.length > 0 && (
-            <div>
-              <h3 className="mb-2 text-sm font-semibold text-muted-foreground">Tags</h3>
-              <div className="flex flex-wrap gap-1">
-                {item.tags.map((t) => (
-                  <Badge key={t} variant="secondary">
-                    {t}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-      </div>
-      {item.related.length > 0 && <RelatedItems items={item.related} />}
-    </div>
-  );
-}
-
-function RelatedItems({ items }: { items: RelatedItemView[] }) {
-  return (
-    <Card className="glass">
-      <CardContent className="p-6">
-        <h3 className="mb-3 text-sm font-semibold text-muted-foreground">Related items</h3>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((r) => {
-            const rdef = categoryDef(r.category);
-            const RIcon = rdef.icon;
-            return (
-              <Link
-                key={r.id}
-                href={`/items/${r.id}`}
-                className="group flex items-center gap-3 rounded-lg border border-border/60 bg-card/50 p-3 transition-colors hover:border-primary/40"
-              >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground group-hover:text-primary">
-                  <RIcon className="h-4 w-4" />
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium group-hover:text-primary">{r.title}</p>
-                  <p className="truncate text-xs text-muted-foreground">{r.location || rdef.label}</p>
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
+    <FrontPage
+      item={{
+        id: item.id,
+        title: item.title,
+        category: item.category,
+        description: item.description,
+        summaryMd: item.summaryMd,
+        summaryAtAGlance: item.summaryAtAGlance,
+        summaryUpdatedAt: item.summaryUpdatedAt,
+        layout: item.layout,
+        fields: item.fields,
+        fieldsMeta: item.fieldsMeta,
+        tags: item.tags,
+        related: item.related,
+      }}
+    />
   );
 }
 
