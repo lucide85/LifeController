@@ -75,6 +75,7 @@ interface ItemData {
   summaryUpdatedAt: string | null;
   layout: string;
   fieldsMeta: Record<string, { hero?: boolean; type?: string }>;
+  fieldSources: Record<string, { source: string; sourceUrl: string | null }>;
   updatedAt: string;
   attachments: Attachment[];
   notes: { id: string; body: string; createdAt: string }[];
@@ -247,6 +248,7 @@ function Overview({ item }: { item: ItemData }) {
         layout: item.layout,
         fields: item.fields,
         fieldsMeta: item.fieldsMeta,
+        fieldSources: item.fieldSources,
         tags: item.tags,
         related: item.related,
       }}

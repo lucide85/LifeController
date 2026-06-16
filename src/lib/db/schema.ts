@@ -9,6 +9,7 @@ import {
   index,
   vector,
   bigint,
+  real,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -31,6 +32,8 @@ export const attachmentSource = pgEnum("attachment_source", ["upload", "web"]);
 // Maintenance task lifecycle + where a task/routine came from.
 export const maintenanceStatus = pgEnum("maintenance_status", ["planned", "done"]);
 export const taskSource = pgEnum("task_source", ["user", "manual", "web"]);
+// Where a recorded spec-field value came from (provenance / write-back history).
+export const factSource = pgEnum("fact_source", ["manual", "ai", "chat", "web", "upload"]);
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 // Access is gated: a new Google login lands as `pending` until an admin approves.
@@ -173,6 +176,33 @@ export const notes = pgTable(
   })
 );
 
+// ── Fact revisions ─────────────────────────────────────────────────────────────
+// Non-destructive history of spec-field values: every write-back (and confirmed
+// AI/chat fact) appends a row recording old→new, where it came from, and how
+// confident we were. The current value still lives in items.fields; this is the
+// provenance/audit trail ("why is this here?") and the basis for undo.
+export const factRevisions = pgTable(
+  "fact_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    fieldKey: text("field_key").notNull(),
+    oldValue: text("old_value"),
+    newValue: text("new_value"),
+    source: factSource("source").notNull().default("manual"),
+    sourceUrl: text("source_url"),
+    sourceRef: text("source_ref"),
+    confidence: real("confidence"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    itemIdx: index("fact_revisions_item_idx").on(t.itemId),
+    itemFieldIdx: index("fact_revisions_item_field_idx").on(t.itemId, t.fieldKey),
+  })
+);
+
 // ── Relations ──────────────────────────────────────────────────────────────────
 export const usersRelations = relations(users, ({ many }) => ({
   items: many(items),
@@ -183,6 +213,11 @@ export const itemsRelations = relations(items, ({ one, many }) => ({
   attachments: many(attachments),
   notes: many(notes),
   tasks: many(maintenanceTasks),
+  factRevisions: many(factRevisions),
+}));
+
+export const factRevisionsRelations = relations(factRevisions, ({ one }) => ({
+  item: one(items, { fields: [factRevisions.itemId], references: [items.id] }),
 }));
 
 export const maintenanceTasksRelations = relations(maintenanceTasks, ({ one, many }) => ({
@@ -207,3 +242,4 @@ export type Item = typeof items.$inferSelect;
 export type Attachment = typeof attachments.$inferSelect;
 export type Note = typeof notes.$inferSelect;
 export type MaintenanceTask = typeof maintenanceTasks.$inferSelect;
+export type FactRevision = typeof factRevisions.$inferSelect;

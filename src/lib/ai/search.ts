@@ -114,6 +114,94 @@ export async function relatedItems(
   return rows.map((r) => ({ ...r, score: Number(r.score) }));
 }
 
+// Retrieve context for ONE item: the item's own fields/description (always
+// included) plus its most relevant attachments and notes. Powers per-item chat.
+export async function retrieveForItem(
+  userId: string,
+  itemId: string,
+  query: string,
+  limit = 10
+): Promise<RetrievedChunk[]> {
+  const item = await db.query.items.findFirst({
+    where: and(eq(items.id, itemId), eq(items.ownerId, userId)),
+    columns: { embedding: false },
+  });
+  if (!item) return [];
+
+  const qVec = embeddingsEnabled() ? await embed(query, "query") : null;
+
+  // The item itself is always the first chunk (title, specs, description).
+  const fieldsText = Object.entries(item.fields ?? {})
+    .map(([k, v]) => `${k}: ${v}`)
+    .join("\n");
+  const itemChunk: RetrievedChunk = {
+    kind: "item",
+    itemId: item.id,
+    itemTitle: item.title,
+    text: [item.title, item.category, item.location, item.description, fieldsText]
+      .filter(Boolean)
+      .join("\n"),
+    score: 1,
+  };
+
+  const attSim = qVec ? SIM(attachments.embedding, qVec) : null;
+  const attRows = await db
+    .select({
+      id: attachments.id,
+      fileName: attachments.fileName,
+      extractedText: attachments.extractedText,
+      sourceUrl: attachments.sourceUrl,
+      score: attSim ?? sql<number>`0.5`,
+    })
+    .from(attachments)
+    .where(
+      and(
+        eq(attachments.itemId, itemId),
+        ...(attSim ? [sql`${attachments.embedding} is not null`] : [])
+      )
+    )
+    .orderBy(attSim ? desc(attSim) : desc(attachments.createdAt))
+    .limit(limit);
+
+  const noteSim = qVec ? SIM(notes.embedding, qVec) : null;
+  const noteRows = await db
+    .select({
+      id: notes.id,
+      body: notes.body,
+      score: noteSim ?? sql<number>`0.5`,
+    })
+    .from(notes)
+    .where(
+      and(eq(notes.itemId, itemId), ...(noteSim ? [sql`${notes.embedding} is not null`] : []))
+    )
+    .orderBy(noteSim ? desc(noteSim) : desc(notes.createdAt))
+    .limit(limit);
+
+  const rest: RetrievedChunk[] = [
+    ...attRows.map((r) => ({
+      kind: "attachment" as const,
+      itemId,
+      itemTitle: item.title,
+      attachmentId: r.id,
+      sourceUrl: r.sourceUrl,
+      text: `${r.fileName}: ${(r.extractedText ?? "").slice(0, 1500)}`,
+      score: Number(r.score),
+    })),
+    ...noteRows.map((r) => ({
+      kind: "note" as const,
+      itemId,
+      itemTitle: item.title,
+      noteId: r.id,
+      text: r.body.slice(0, 1500),
+      score: Number(r.score),
+    })),
+  ]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit - 1);
+
+  return [itemChunk, ...rest];
+}
+
 async function retrieveSemantic(
   userId: string,
   qVec: number[],

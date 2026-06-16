@@ -3,7 +3,7 @@
 // what we know about the item, and returns findings + sources so they can be
 // stored back into the library.
 import { getAnthropic, getModel } from "./anthropic";
-import { retrieve, type RetrievedChunk } from "./search";
+import { retrieve, retrieveForItem, type RetrievedChunk } from "./search";
 
 export interface AgentAnswer {
   answer: string;
@@ -61,6 +61,73 @@ export async function answerFromLibrary(
     found,
     sources: chunks.filter((c) => c.score > 0.3),
     suggestedWebQuery: found ? undefined : question,
+  };
+}
+
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface ItemChatAnswer {
+  answer: string;
+  found: boolean;
+  sources: RetrievedChunk[];
+}
+
+// Multi-turn chat grounded ONLY in one item's own data (its fields, description,
+// attachments and notes). Prior turns are passed for continuity; retrieval re-runs
+// against the latest message each turn so context stays focused.
+export async function answerAboutItem(
+  userId: string,
+  itemId: string,
+  message: string,
+  history: ChatTurn[] = []
+): Promise<ItemChatAnswer> {
+  const chunks = await retrieveForItem(userId, itemId, message, 10);
+
+  const context = chunks
+    .map((c, i) => `[${i + 1}] (${c.kind})\n${c.text}`)
+    .join("\n\n");
+
+  // Keep the last few turns only, to bound context.
+  const recent = history.slice(-8).map((t) => ({
+    role: t.role,
+    content: t.content.slice(0, 4000),
+  }));
+
+  const anthropic = getAnthropic();
+  const res = await anthropic.messages.create({
+    model: getModel(),
+    max_tokens: 1024,
+    system:
+      "You are the owner's assistant for ONE specific item in their library. Answer using " +
+      "ONLY the item context provided (its specs, description, attached documents and notes). " +
+      "Cite the bracketed source numbers you used, e.g. [2]. If the context does not contain " +
+      "the answer, reply with EXACTLY the token NOT_FOUND on its own line, optionally followed " +
+      "by a short note. Never invent specifications, serial numbers, dates or facts.",
+    messages: [
+      ...recent,
+      {
+        role: "user",
+        content: `${message}\n\n--- ITEM CONTEXT ---\n${
+          context || "(no stored context for this item yet)"
+        }`,
+      },
+    ],
+  });
+
+  const text = res.content
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+
+  const found = !/^\s*NOT_FOUND/m.test(text);
+  return {
+    answer: found ? text : text.replace(/^\s*NOT_FOUND\s*/m, "").trim(),
+    found,
+    sources: chunks.filter((c) => c.kind !== "item" && c.score > 0.3),
   };
 }
 

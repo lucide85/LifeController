@@ -29,8 +29,31 @@ export interface FrontPageItem {
   layout: string;
   fields: Record<string, string>;
   fieldsMeta: Record<string, { hero?: boolean; type?: string }>;
+  fieldSources: Record<string, { source: string; sourceUrl: string | null }>;
   tags: string[];
   related: RelatedItemView[];
+}
+
+// A small provenance dot shown next to fields whose value came from somewhere
+// other than manual entry (chat, web, an AI/document extraction).
+function SourceMark({ src }: { src?: { source: string; sourceUrl: string | null } }) {
+  if (!src || src.source === "manual") return null;
+  const label = `From ${src.source}`;
+  const dot = (
+    <span
+      title={label}
+      className="ml-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-primary/60 align-middle"
+    />
+  );
+  // Only link out for real http(s) URLs (never javascript:/data:).
+  const safeUrl = src.sourceUrl && /^https?:\/\//i.test(src.sourceUrl) ? src.sourceUrl : null;
+  return safeUrl ? (
+    <a href={safeUrl} target="_blank" rel="noreferrer" title={label}>
+      {dot}
+    </a>
+  ) : (
+    dot
+  );
 }
 
 // Per-archetype presentation tweaks. Keeps the layout genuinely adaptive without
@@ -144,7 +167,10 @@ export function FrontPage({ item }: { item: FrontPageItem }) {
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   {heroEntries.map(([k, v]) => (
                     <div key={k} className="rounded-xl border border-border/60 bg-background/40 p-3">
-                      <p className="truncate text-xs text-muted-foreground">{k}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {k}
+                        <SourceMark src={item.fieldSources?.[k]} />
+                      </p>
                       <p className="mt-0.5 truncate font-semibold">
                         {formatValue(item.fieldsMeta?.[k]?.type, v)}
                       </p>
@@ -169,7 +195,10 @@ export function FrontPage({ item }: { item: FrontPageItem }) {
                 <dl className="grid gap-2 sm:grid-cols-2">
                   {restEntries.map(([k, v]) => (
                     <div key={k} className="flex justify-between gap-3 text-sm">
-                      <dt className="text-muted-foreground">{k}</dt>
+                      <dt className="text-muted-foreground">
+                        {k}
+                        <SourceMark src={item.fieldSources?.[k]} />
+                      </dt>
                       <dd className="text-right font-medium">
                         {formatValue(item.fieldsMeta?.[k]?.type, v)}
                       </dd>

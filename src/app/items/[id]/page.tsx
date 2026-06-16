@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { requireApprovedUser } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
-import { items } from "@/lib/db/schema";
+import { items, factRevisions } from "@/lib/db/schema";
 import { relatedItems } from "@/lib/ai/search";
 import { AppShell } from "@/components/app-shell";
 import { ItemDetail } from "@/components/item-detail";
@@ -31,6 +31,24 @@ export default async function ItemPage({
   // Nearest items by embedding (best-effort: empty if AI/embeddings are off).
   const related = await relatedItems(user.id, item.id, 6).catch(() => []);
 
+  // Provenance: the latest recorded source per spec field ("why is this here?").
+  const revisions = await db
+    .select({
+      fieldKey: factRevisions.fieldKey,
+      source: factRevisions.source,
+      sourceUrl: factRevisions.sourceUrl,
+    })
+    .from(factRevisions)
+    .where(eq(factRevisions.itemId, item.id))
+    .orderBy(desc(factRevisions.createdAt))
+    .limit(300);
+  const fieldSources: Record<string, { source: string; sourceUrl: string | null }> = {};
+  for (const r of revisions) {
+    if (!fieldSources[r.fieldKey]) {
+      fieldSources[r.fieldKey] = { source: r.source, sourceUrl: r.sourceUrl };
+    }
+  }
+
   // Serialize dates for the client component.
   const serialized = {
     id: item.id,
@@ -45,6 +63,7 @@ export default async function ItemPage({
     summaryUpdatedAt: item.summaryUpdatedAt ? item.summaryUpdatedAt.toISOString() : null,
     layout: item.layout ?? "generic",
     fieldsMeta: item.fieldsMeta ?? {},
+    fieldSources,
     updatedAt: item.updatedAt.toISOString(),
     attachments: item.attachments
       .map((a) => ({
