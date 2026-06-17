@@ -7,7 +7,10 @@ import { getApprovedUserOrNull } from "@/lib/auth-guard";
 
 export const runtime = "nodejs";
 
-export const RELATIONS = [
+// NOTE: a Next.js route file may only export the HTTP handlers + recognised config
+// (runtime, maxDuration, …). This must stay a LOCAL const — exporting it makes the
+// build fail with "X is not a valid Route export field".
+const RELATIONS = [
   "related",
   "part-of",
   "stored-in",
