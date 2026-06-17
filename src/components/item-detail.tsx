@@ -41,6 +41,7 @@ import { FilePreview, type PreviewAttachment } from "@/components/file-preview";
 import { AutofillDialog } from "@/components/autofill-dialog";
 import { GallerySection } from "@/components/gallery-section";
 import { FrontPage } from "@/components/front-page";
+import { type LinkView } from "@/components/relations-card";
 
 interface Attachment {
   id: string;
@@ -76,11 +77,13 @@ interface ItemData {
   layout: string;
   fieldsMeta: Record<string, { hero?: boolean; type?: string }>;
   fieldSources: Record<string, { source: string; sourceUrl: string | null }>;
+  heroImageId: string | null;
   updatedAt: string;
   attachments: Attachment[];
   notes: { id: string; body: string; createdAt: string }[];
   tasks: Task[];
   related: RelatedItemView[];
+  links: LinkView[];
 }
 
 export function ItemDetail({ item }: { item: ItemData }) {
@@ -249,8 +252,10 @@ function Overview({ item }: { item: ItemData }) {
         fields: item.fields,
         fieldsMeta: item.fieldsMeta,
         fieldSources: item.fieldSources,
+        heroImageId: item.heroImageId,
         tags: item.tags,
         related: item.related,
+        links: item.links,
       }}
     />
   );

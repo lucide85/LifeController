@@ -1,15 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Sparkles, RefreshCw, Loader2, ExternalLink, AlertTriangle } from "lucide-react";
+import { Sparkles, RefreshCw, Loader2, ExternalLink, AlertTriangle, ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { categoryDef } from "@/lib/categories";
 import { formatDate } from "@/lib/utils";
 import { Markdown } from "@/components/markdown";
+import { CoverDialog } from "@/components/cover-dialog";
+import { RelationsCard, type LinkView } from "@/components/relations-card";
 
 export interface RelatedItemView {
   id: string;
@@ -30,8 +30,10 @@ export interface FrontPageItem {
   fields: Record<string, string>;
   fieldsMeta: Record<string, { hero?: boolean; type?: string }>;
   fieldSources: Record<string, { source: string; sourceUrl: string | null }>;
+  heroImageId: string | null;
   tags: string[];
   related: RelatedItemView[];
+  links: LinkView[];
 }
 
 // A small provenance dot shown next to fields whose value came from somewhere
@@ -92,6 +94,7 @@ export function FrontPage({ item }: { item: FrontPageItem }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [coverOpen, setCoverOpen] = useState(false);
 
   const cfg = ARCHETYPE[item.layout] ?? ARCHETYPE.generic;
   const fieldEntries = Object.entries(item.fields ?? {});
@@ -152,6 +155,40 @@ export function FrontPage({ item }: { item: FrontPageItem }) {
 
   return (
     <div className="space-y-4">
+      {/* Cover image */}
+      {item.heroImageId ? (
+        <div className="relative overflow-hidden rounded-2xl border border-border/60">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/api/files/${item.heroImageId}`}
+            alt={item.title}
+            className="h-48 w-full object-cover sm:h-60"
+          />
+          <Button
+            variant="secondary"
+            size="sm"
+            className="absolute right-3 top-3"
+            onClick={() => setCoverOpen(true)}
+          >
+            <ImageIcon /> Change cover
+          </Button>
+        </div>
+      ) : (
+        <div className="flex justify-end">
+          <Button variant="outline" size="sm" onClick={() => setCoverOpen(true)}>
+            <ImageIcon /> Add cover image
+          </Button>
+        </div>
+      )}
+
+      {coverOpen && (
+        <CoverDialog
+          itemId={item.id}
+          defaultQuery={item.title}
+          onClose={() => setCoverOpen(false)}
+        />
+      )}
+
       {/* At-a-glance + hero stats */}
       {(item.summaryAtAGlance || heroEntries.length > 0) && (
         <Card className="glass">
@@ -225,38 +262,7 @@ export function FrontPage({ item }: { item: FrontPageItem }) {
 
       {!cfg.summaryFirst && summaryCard}
 
-      {item.related.length > 0 && (
-        <Card className="glass">
-          <CardContent className="p-6">
-            <h3 className="mb-3 text-sm font-semibold text-muted-foreground">Related items</h3>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {item.related.map((r) => {
-                const rdef = categoryDef(r.category);
-                const RIcon = rdef.icon;
-                return (
-                  <Link
-                    key={r.id}
-                    href={`/items/${r.id}`}
-                    className="group flex items-center gap-3 rounded-lg border border-border/60 bg-card/50 p-3 transition-colors hover:border-primary/40"
-                  >
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground group-hover:text-primary">
-                      <RIcon className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium group-hover:text-primary">
-                        {r.title}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {r.location || rdef.label}
-                      </p>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <RelationsCard itemId={item.id} related={item.related} links={item.links} />
     </div>
   );
 }

@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, or, inArray } from "drizzle-orm";
 import { requireApprovedUser } from "@/lib/auth-guard";
 import { db } from "@/lib/db";
-import { items, factRevisions } from "@/lib/db/schema";
+import { items, factRevisions, itemLinks } from "@/lib/db/schema";
 import { relatedItems } from "@/lib/ai/search";
 import { AppShell } from "@/components/app-shell";
 import { ItemDetail } from "@/components/item-detail";
@@ -49,6 +49,47 @@ export default async function ItemPage({
     }
   }
 
+  // Cover image: only if the referenced attachment still exists on this item.
+  const heroImageId =
+    item.heroAttachmentId && item.attachments.some((a) => a.id === item.heroAttachmentId)
+      ? item.heroAttachmentId
+      : null;
+
+  // Confirmed cross-item links (either direction), with the other item resolved.
+  const linkRows = await db
+    .select({
+      id: itemLinks.id,
+      relation: itemLinks.relation,
+      origin: itemLinks.origin,
+      fromItemId: itemLinks.fromItemId,
+      toItemId: itemLinks.toItemId,
+    })
+    .from(itemLinks)
+    .where(
+      and(
+        eq(itemLinks.ownerId, user.id),
+        or(eq(itemLinks.fromItemId, item.id), eq(itemLinks.toItemId, item.id))
+      )
+    );
+  const otherIds = Array.from(
+    new Set(linkRows.map((r) => (r.fromItemId === item.id ? r.toItemId : r.fromItemId)))
+  );
+  const others = otherIds.length
+    ? await db
+        .select({ id: items.id, title: items.title, category: items.category })
+        .from(items)
+        .where(and(eq(items.ownerId, user.id), inArray(items.id, otherIds)))
+    : [];
+  const otherById = new Map(others.map((o) => [o.id, o]));
+  const links = linkRows
+    .map((r) => {
+      const otherId = r.fromItemId === item.id ? r.toItemId : r.fromItemId;
+      const other = otherById.get(otherId);
+      if (!other) return null;
+      return { id: r.id, relation: r.relation, origin: r.origin, outgoing: r.fromItemId === item.id, other };
+    })
+    .filter((l): l is NonNullable<typeof l> => l !== null);
+
   // Serialize dates for the client component.
   const serialized = {
     id: item.id,
@@ -64,6 +105,8 @@ export default async function ItemPage({
     layout: item.layout ?? "generic",
     fieldsMeta: item.fieldsMeta ?? {},
     fieldSources,
+    heroImageId,
+    links,
     updatedAt: item.updatedAt.toISOString(),
     attachments: item.attachments
       .map((a) => ({

@@ -7,6 +7,7 @@ import {
   jsonb,
   pgEnum,
   index,
+  uniqueIndex,
   vector,
   bigint,
   real,
@@ -79,6 +80,9 @@ export const items = pgTable(
     fieldsMeta: jsonb("fields_meta")
       .$type<Record<string, { hero?: boolean; type?: string }>>()
       .default({}),
+    // The image attachment chosen as this item's cover/hero (nullable; no FK so an
+    // attachment delete just leaves a dangling id we null-check on read).
+    heroAttachmentId: uuid("hero_attachment_id"),
     // Semantic embedding of the item's title + description + fields, for AI search.
     embedding: vector("embedding", { dimensions: EMBEDDING_DIM }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -248,6 +252,35 @@ export const captures = pgTable(
   })
 );
 
+// ── Item links ───────────────────────────────────────────────────────────────
+// Confirmed, typed relationships between two of the owner's items (e.g. a charger
+// "accessory-of" a laptop, a receipt "covers" an appliance). Bidirectional: read
+// by querying both from/to. `origin` records whether the owner or AI proposed it.
+export const itemLinks = pgTable(
+  "item_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: uuid("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    fromItemId: uuid("from_item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    toItemId: uuid("to_item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    relation: text("relation").notNull().default("related"),
+    origin: text("origin").notNull().default("user"),
+    confidence: real("confidence"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqueIdx: uniqueIndex("item_links_unique_idx").on(t.fromItemId, t.toItemId, t.relation),
+    fromIdx: index("item_links_from_idx").on(t.fromItemId),
+    toIdx: index("item_links_to_idx").on(t.toItemId),
+  })
+);
+
 // ── Relations ──────────────────────────────────────────────────────────────────
 export const usersRelations = relations(users, ({ many }) => ({
   items: many(items),
@@ -294,3 +327,4 @@ export type Note = typeof notes.$inferSelect;
 export type MaintenanceTask = typeof maintenanceTasks.$inferSelect;
 export type FactRevision = typeof factRevisions.$inferSelect;
 export type Capture = typeof captures.$inferSelect;
+export type ItemLink = typeof itemLinks.$inferSelect;
