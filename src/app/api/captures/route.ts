@@ -106,8 +106,10 @@ export async function POST(req: NextRequest) {
       embedding = processed.embedding;
     } else {
       const body = await req.json().catch(() => ({}));
-      const urlInput = typeof body.url === "string" ? body.url.trim() : "";
-      const textInput = typeof body.text === "string" ? body.text.trim() : "";
+      // Annotate as string: req.json() is `any`, which would otherwise widen the
+      // values back to `any` and defeat narrowing on the `string | null` vars below.
+      const urlInput: string = typeof body.url === "string" ? body.url.trim() : "";
+      const textInput: string = typeof body.text === "string" ? body.text.trim() : "";
 
       if (urlInput) {
         kind = "url";
