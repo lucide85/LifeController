@@ -1,24 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { captures, items } from "@/lib/db/schema";
+import { captures } from "@/lib/db/schema";
 import { getApprovedUserOrNull } from "@/lib/auth-guard";
-import { processUpload } from "@/lib/ingest/process";
-import { fetchUrlContent } from "@/lib/ingest/url";
-import { embed } from "@/lib/ai/embeddings";
-import { nearestItemsByVector } from "@/lib/ai/search";
-import { classifyAndRoute, type CaptureSuggestion } from "@/lib/ai/ingest";
+import { ingestCapture } from "@/lib/ingest/capture";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
-
-function deriveTitle(parts: (string | null | undefined)[]): string {
-  for (const p of parts) {
-    const s = (p ?? "").trim();
-    if (s) return s.slice(0, 120);
-  }
-  return "Untitled";
-}
 
 // List inbox captures.
 export async function GET(req: NextRequest) {
@@ -67,18 +55,6 @@ export async function POST(req: NextRequest) {
 
   const contentType = req.headers.get("content-type") ?? "";
 
-  let kind: "text" | "url" | "file" = "text";
-  let rawText: string | null = null;
-  let sourceUrl: string | null = null;
-  let sourceTitle: string | null = null;
-  let fileName: string | null = null;
-  let mimeType: string | null = null;
-  let sizeBytes = 0;
-  let storageKey: string | null = null;
-  let imageUrl: string | null = null;
-  let extractedText = "";
-  let embedding: number[] | null = null;
-
   try {
     if (contentType.includes("multipart/form-data")) {
       const form = await req.formData();
@@ -90,110 +66,28 @@ export async function POST(req: NextRequest) {
       if (file.size > maxMb * 1024 * 1024) {
         return NextResponse.json({ error: `File exceeds ${maxMb}MB` }, { status: 413 });
       }
-      kind = "file";
-      fileName = file.name;
-      mimeType = file.type || "application/octet-stream";
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const processed = await processUpload({
-        prefix: "_inbox",
-        fileName: file.name,
-        mimeType,
-        buffer,
+      const result = await ingestCapture({
+        ownerId: user.id,
+        file: {
+          buffer: Buffer.from(await file.arrayBuffer()),
+          fileName: file.name,
+          mimeType: file.type || "application/octet-stream",
+        },
       });
-      storageKey = processed.storageKey;
-      sizeBytes = processed.sizeBytes;
-      extractedText = processed.extractedText;
-      embedding = processed.embedding;
-    } else {
-      const body = await req.json().catch(() => ({}));
-      // Annotate as string: req.json() is `any`, which would otherwise widen the
-      // values back to `any` and defeat narrowing on the `string | null` vars below.
-      const urlInput: string = typeof body.url === "string" ? body.url.trim() : "";
-      const textInput: string = typeof body.text === "string" ? body.text.trim() : "";
-
-      if (urlInput) {
-        kind = "url";
-        const content = await fetchUrlContent(urlInput); // throws on invalid/SSRF/too-large
-        sourceUrl = content.canonicalUrl;
-        sourceTitle = content.title;
-        imageUrl = content.imageUrl;
-        extractedText = [content.title, content.description, content.text]
-          .filter(Boolean)
-          .join("\n\n");
-        embedding = extractedText ? await embed(extractedText) : null;
-      } else if (textInput) {
-        kind = "text";
-        rawText = textInput.slice(0, 20000);
-        extractedText = rawText;
-        embedding = await embed(rawText);
-      } else {
-        return NextResponse.json({ error: "Provide a file, url or text." }, { status: 400 });
-      }
+      return NextResponse.json(result, { status: 201 });
     }
+
+    const body = await req.json().catch(() => ({}));
+    const url: string = typeof body.url === "string" ? body.url.trim() : "";
+    const text: string = typeof body.text === "string" ? body.text.trim() : "";
+    if (!url && !text) {
+      return NextResponse.json({ error: "Provide a file, url or text." }, { status: 400 });
+    }
+    const result = await ingestCapture({ ownerId: user.id, url: url || undefined, text: text || undefined });
+    return NextResponse.json(result, { status: 201 });
   } catch (err) {
     console.error("capture intake failed:", err);
     const detail = err instanceof Error ? err.message : "could not read that";
     return NextResponse.json({ error: detail }, { status: 400 });
   }
-
-  // Insert the capture first (fast), then attach the triage proposal.
-  const [created] = await db
-    .insert(captures)
-    .values({
-      ownerId: user.id,
-      status: "inbox",
-      kind,
-      rawText,
-      sourceUrl,
-      sourceTitle,
-      fileName,
-      mimeType,
-      sizeBytes,
-      storageKey,
-      imageUrl,
-      extractedText: extractedText || null,
-      embedding,
-    })
-    .returning({ id: captures.id });
-
-  // AI triage (best-effort): candidates from similarity + the owner's categories.
-  let suggestion: CaptureSuggestion | null = null;
-  try {
-    const candidates = embedding ? await nearestItemsByVector(user.id, embedding, 5) : [];
-    const cats = await db
-      .selectDistinct({ category: items.category })
-      .from(items)
-      .where(eq(items.ownerId, user.id));
-    suggestion = await classifyAndRoute({
-      text: extractedText || rawText || "",
-      kind,
-      sourceTitle,
-      candidates,
-      categories: cats.map((c) => c.category),
-    });
-  } catch (err) {
-    console.error("capture triage failed:", err);
-  }
-
-  // Fallback when AI is off/failed: propose creating a new item.
-  if (!suggestion) {
-    suggestion = {
-      action: "create",
-      targetItemId: null,
-      title: deriveTitle([sourceTitle, fileName, extractedText, rawText]),
-      category: "general",
-      summary: null,
-      tags: [],
-      fields: {},
-      confidence: 0,
-      candidates: [],
-    };
-  }
-
-  await db
-    .update(captures)
-    .set({ suggestedAction: suggestion as unknown as Record<string, unknown> })
-    .where(eq(captures.id, created.id));
-
-  return NextResponse.json({ id: created.id, suggestion }, { status: 201 });
 }
