@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { and, eq, sql } from "drizzle-orm";
-import { Library, Sparkles, Plus, Boxes, Inbox } from "lucide-react";
+import { Library, Sparkles, Plus, Boxes, Inbox, Lightbulb } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { UserMenu } from "@/components/user-menu";
 import { db } from "@/lib/db";
-import { captures, type User } from "@/lib/db/schema";
+import { captures, suggestions, type User } from "@/lib/db/schema";
 
 async function inboxCount(userId: string): Promise<number> {
   try {
@@ -20,6 +20,18 @@ async function inboxCount(userId: string): Promise<number> {
   }
 }
 
+async function suggestionCount(userId: string): Promise<number> {
+  try {
+    const [row] = await db
+      .select({ c: sql<number>`count(*)::int` })
+      .from(suggestions)
+      .where(and(eq(suggestions.ownerId, userId), eq(suggestions.status, "pending")));
+    return Number(row?.c ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
 export async function AppShell({
   user,
   children,
@@ -27,7 +39,10 @@ export async function AppShell({
   user: User;
   children: React.ReactNode;
 }) {
-  const pendingCaptures = await inboxCount(user.id);
+  const [pendingCaptures, pendingSuggestions] = await Promise.all([
+    inboxCount(user.id),
+    suggestionCount(user.id),
+  ]);
   return (
     <div className="relative min-h-screen">
       <div className="aurora-bg" />
@@ -57,6 +72,16 @@ export async function AppShell({
                 {pendingCaptures > 0 && (
                   <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
                     {pendingCaptures}
+                  </Badge>
+                )}
+              </Link>
+            </Button>
+            <Button asChild variant="ghost" size="sm" className="relative">
+              <Link href="/suggestions">
+                <Lightbulb /> <span className="hidden sm:inline">Suggestions</span>
+                {pendingSuggestions > 0 && (
+                  <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
+                    {pendingSuggestions}
                   </Badge>
                 )}
               </Link>

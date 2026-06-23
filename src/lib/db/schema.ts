@@ -38,6 +38,9 @@ export const factSource = pgEnum("fact_source", ["manual", "ai", "chat", "web", 
 // Capture-inbox lifecycle + what kind of raw thing was dropped.
 export const captureStatus = pgEnum("capture_status", ["inbox", "filed", "discarded"]);
 export const captureKind = pgEnum("capture_kind", ["text", "url", "file"]);
+// Proactive cross-item suggestions: what kind of proposal + its review lifecycle.
+export const suggestionKind = pgEnum("suggestion_kind", ["duplicate", "link", "field_gap"]);
+export const suggestionStatus = pgEnum("suggestion_status", ["pending", "accepted", "dismissed"]);
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 // Access is gated: a new Google login lands as `pending` until an admin approves.
@@ -281,6 +284,48 @@ export const itemLinks = pgTable(
   })
 );
 
+// ── Suggestions (proactive cross-item intelligence) ─────────────────────────────
+// Ambient proposals the app surfaces for the owner to accept or dismiss: likely
+// duplicates, candidate links between items, and spec-field gaps it can fill from an
+// item's own stored documents. Nothing is applied without the owner confirming.
+// `dedupeKey` (unique per owner) stops the periodic scan re-proposing something the
+// owner already accepted or dismissed (the resolved row stays and blocks re-insert).
+export const suggestions = pgTable(
+  "suggestions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: uuid("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: suggestionKind("kind").notNull(),
+    status: suggestionStatus("status").notNull().default("pending"),
+    // The subject item the suggestion is about.
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    // The other item (duplicate / link suggestions); null for field gaps.
+    relatedItemId: uuid("related_item_id").references(() => items.id, { onDelete: "cascade" }),
+    // Proposed relationship type for a link suggestion (e.g. "related", "accessory-of").
+    relation: text("relation"),
+    // Field-gap suggestions: which empty field, and the value to fill it with.
+    fieldKey: text("field_key"),
+    proposedValue: text("proposed_value"),
+    title: text("title"),
+    detail: text("detail"),
+    sourceUrl: text("source_url"),
+    confidence: real("confidence"),
+    // Stable per-owner key used to avoid re-proposing the same thing.
+    dedupeKey: text("dedupe_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => ({
+    ownerIdx: index("suggestions_owner_idx").on(t.ownerId),
+    statusIdx: index("suggestions_status_idx").on(t.status),
+    dedupeIdx: uniqueIndex("suggestions_dedupe_idx").on(t.ownerId, t.dedupeKey),
+  })
+);
+
 // ── Relations ──────────────────────────────────────────────────────────────────
 export const usersRelations = relations(users, ({ many }) => ({
   items: many(items),
@@ -328,3 +373,4 @@ export type MaintenanceTask = typeof maintenanceTasks.$inferSelect;
 export type FactRevision = typeof factRevisions.$inferSelect;
 export type Capture = typeof captures.$inferSelect;
 export type ItemLink = typeof itemLinks.$inferSelect;
+export type Suggestion = typeof suggestions.$inferSelect;

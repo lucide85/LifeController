@@ -3,7 +3,7 @@
 // Composed by Claude into a friendly note when available, else a plain fallback.
 import { and, asc, desc, eq, gte, isNotNull, lte, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { items, maintenanceTasks, captures } from "@/lib/db/schema";
+import { items, maintenanceTasks, captures, suggestions } from "@/lib/db/schema";
 import { getAnthropic, getModel, hasAnthropic } from "@/lib/ai/anthropic";
 
 function daysFromNow(days: number): Date {
@@ -13,7 +13,7 @@ function daysFromNow(days: number): Date {
 export async function buildDigest(ownerId: string): Promise<string | null> {
   const now = new Date();
 
-  const [dueTasks, inboxCountRow, neglected, recentCountRow] = await Promise.all([
+  const [dueTasks, inboxCountRow, neglected, recentCountRow, pendingSuggRow] = await Promise.all([
     db
       .select({
         title: maintenanceTasks.title,
@@ -46,16 +46,30 @@ export async function buildDigest(ownerId: string): Promise<string | null> {
       .select({ c: sql<number>`count(*)::int` })
       .from(items)
       .where(and(eq(items.ownerId, ownerId), gte(items.createdAt, daysFromNow(-7)))),
+    // Pending proactive suggestions. `.catch` so a not-yet-migrated table can't take
+    // down the whole briefing (the rest of the digest still composes).
+    db
+      .select({ c: sql<number>`count(*)::int` })
+      .from(suggestions)
+      .where(and(eq(suggestions.ownerId, ownerId), eq(suggestions.status, "pending")))
+      .catch(() => [{ c: 0 }] as { c: number }[]),
   ]);
 
   const inboxCount = Number(inboxCountRow[0]?.c ?? 0);
   const recentCount = Number(recentCountRow[0]?.c ?? 0);
+  const pendingSugg = Number(pendingSuggRow[0]?.c ?? 0);
 
   const overdue = dueTasks.filter((t) => t.dueDate && t.dueDate < now);
   const upcoming = dueTasks.filter((t) => t.dueDate && t.dueDate >= now);
 
   // Nothing worth pinging about.
-  if (!dueTasks.length && inboxCount === 0 && !neglected.length && recentCount === 0) {
+  if (
+    !dueTasks.length &&
+    inboxCount === 0 &&
+    !neglected.length &&
+    recentCount === 0 &&
+    pendingSugg === 0
+  ) {
     return null;
   }
 
@@ -70,6 +84,10 @@ export async function buildDigest(ownerId: string): Promise<string | null> {
       `Upcoming maintenance: ${upcoming.map((t) => `${t.title} (${t.itemTitle}, due ${fmt(t.dueDate)})`).join("; ")}`
     );
   if (inboxCount) factLines.push(`${inboxCount} item(s) waiting in the capture inbox to be filed.`);
+  if (pendingSugg)
+    factLines.push(
+      `${pendingSugg} suggestion(s) awaiting review (possible duplicates, links between items, or details to fill in).`
+    );
   if (recentCount) factLines.push(`${recentCount} item(s) added in the last 7 days.`);
   if (neglected.length)
     factLines.push(
