@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -15,6 +15,8 @@ import {
   StickyNote,
   Sparkles,
   ArrowRight,
+  Camera,
+  CloudOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,33 +71,119 @@ function captureTitle(c: InboxCapture): string {
   );
 }
 
+// Offline queue for text/url captures: when there's no connection, a jotted note or
+// pasted link is stashed in localStorage and replayed to /api/captures once we're back
+// online (on reconnect, and on next load). Files need a connection (deferred).
+type OfflineCapture = { url?: string; text?: string };
+const OFFLINE_KEY = "lc_offline_captures";
+
+function readOfflineQueue(): OfflineCapture[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(OFFLINE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeOfflineQueue(items: OfflineCapture[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(OFFLINE_KEY, JSON.stringify(items));
+  } catch {
+    // storage unavailable / full — nothing we can do; drop silently.
+  }
+}
+
 export function CaptureInbox({ initial }: { initial: InboxCapture[] }) {
   const router = useRouter();
   const [input, setInput] = useState("");
   const [adding, setAdding] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [queuedCount, setQueuedCount] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
 
   const isUrl = looksLikeUrl(input);
+
+  function enqueueOffline(body: OfflineCapture) {
+    const q = readOfflineQueue();
+    q.push(body);
+    writeOfflineQueue(q);
+    setQueuedCount(q.length);
+  }
+
+  // Replay any queued offline captures. Network failures keep an item for next time;
+  // a server rejection drops it (so a bad item can't wedge the queue forever).
+  async function flushOfflineQueue() {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+    const q = readOfflineQueue();
+    if (!q.length) return;
+    const remaining: OfflineCapture[] = [];
+    let synced = 0;
+    for (const item of q) {
+      try {
+        const res = await fetch("/api/captures", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(item),
+        });
+        if (res.ok) synced++;
+        // !res.ok → drop (don't retry a server-rejected item endlessly)
+      } catch {
+        remaining.push(item); // still offline / network error → keep for later
+      }
+    }
+    writeOfflineQueue(remaining);
+    setQueuedCount(remaining.length);
+    if (synced > 0) router.refresh();
+  }
+
+  // On mount, surface any pending queue and try to flush it; also flush on reconnect.
+  useEffect(() => {
+    setQueuedCount(readOfflineQueue().length);
+    flushOfflineQueue();
+    const onOnline = () => flushOfflineQueue();
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function addTextOrUrl() {
     const text = input.trim();
     if (!text || adding) return;
-    setAdding(true);
-    const body = looksLikeUrl(text) ? { url: text } : { text };
-    const res = await fetch("/api/captures", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    setAdding(false);
-    if (res.ok) {
+    const body: OfflineCapture = looksLikeUrl(text) ? { url: text } : { text };
+
+    // Offline → stash and sync later instead of failing.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      enqueueOffline(body);
       setInput("");
-      router.refresh();
-    } else {
-      const j = await res.json().catch(() => ({}));
-      alert(typeof j.error === "string" ? j.error : "Could not add that.");
+      return;
+    }
+
+    setAdding(true);
+    try {
+      const res = await fetch("/api/captures", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      setAdding(false);
+      if (res.ok) {
+        setInput("");
+        router.refresh();
+      } else {
+        const j = await res.json().catch(() => ({}));
+        alert(typeof j.error === "string" ? j.error : "Could not add that.");
+      }
+    } catch {
+      // Network dropped mid-request → queue it rather than lose it.
+      setAdding(false);
+      enqueueOffline(body);
+      setInput("");
     }
   }
 
@@ -151,6 +239,30 @@ export function CaptureInbox({ initial }: { initial: InboxCapture[] }) {
               hidden
               onChange={(e) => e.target.files && uploadFiles(e.target.files)}
             />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => cameraRef.current?.click()}
+              disabled={uploading}
+            >
+              <Camera /> Take photo
+            </Button>
+            <input
+              ref={cameraRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              hidden
+              onChange={(e) => e.target.files && uploadFiles(e.target.files)}
+            />
+            {queuedCount > 0 && (
+              <span className="flex items-center gap-1 text-xs text-amber-500">
+                <CloudOff className="h-3.5 w-3.5" /> {queuedCount} saved offline — will sync when back online
+              </span>
+            )}
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row">

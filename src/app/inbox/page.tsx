@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { captures } from "@/lib/db/schema";
 import { AppShell } from "@/components/app-shell";
 import { CaptureInbox, type InboxCapture } from "@/components/capture-inbox";
+import { ClipHelp } from "@/components/clip-help";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +73,9 @@ export default async function InboxPage({
         </div>
       )}
       <CaptureInbox initial={initial} />
+      <div className="mt-6">
+        <ClipHelp />
+      </div>
     </AppShell>
   );
 }
