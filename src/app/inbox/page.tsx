@@ -7,8 +7,13 @@ import { CaptureInbox, type InboxCapture } from "@/components/capture-inbox";
 
 export const dynamic = "force-dynamic";
 
-export default async function InboxPage() {
+export default async function InboxPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ shared?: string }>;
+}) {
   const user = await requireApprovedUser();
+  const { shared } = await searchParams;
 
   const rows = await db
     .select({
@@ -46,6 +51,26 @@ export default async function InboxPage() {
 
   return (
     <AppShell user={user}>
+      {shared === "1" && (
+        <div className="mb-4 rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-sm">
+          ✅ Shared to your inbox — triaged below.
+        </div>
+      )}
+      {shared === "partial" && (
+        <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm">
+          ✅ Saved what I could — some shared files were skipped (too large or unreadable).
+        </div>
+      )}
+      {shared === "error" && (
+        <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm">
+          ⚠️ Couldn&apos;t save the shared item. Try again, or add it from here.
+        </div>
+      )}
+      {shared === "empty" && (
+        <div className="mb-4 rounded-lg border border-border/60 bg-card/50 px-4 py-2 text-sm">
+          There was nothing to save from that share.
+        </div>
+      )}
       <CaptureInbox initial={initial} />
     </AppShell>
   );
